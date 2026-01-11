@@ -1,0 +1,16 @@
+services:
+  fs-esl:
+    image: safarov/freeswitch:latest
+    container_name: fs-esl
+    ports:
+      - "8021:8021"
+      - "5060:5060/udp"
+      - "39000-39100:39000-39100/udp"
+    volumes:
+      - fs_etc:/etc/freeswitch
+      - ./conf/autoload_configs:/etc/freeswitch/autoload_configs:ro
+      - ./conf/sip_profiles/external:/etc/freeswitch/sip_profiles/external:ro
+    restart: unless-stopped
+
+volumes:
+  fs_etc:

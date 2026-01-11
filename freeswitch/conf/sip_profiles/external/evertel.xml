@@ -1,0 +1,8 @@
+<include>
+  <gateway name="evertel">
+    <param name="proxy" value="evertel.trunksip.me"/>
+    <param name="username" value="8747292564314"/>
+    <param name="password" value="Lq9Xz8HuGx4IpArZ"/>
+    <param name="register" value="true"/>
+  </gateway>
+</include>

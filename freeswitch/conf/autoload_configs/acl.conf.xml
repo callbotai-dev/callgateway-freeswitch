@@ -1,0 +1,8 @@
+<configuration name="acl.conf" description="Network Lists">
+  <network-lists>
+    <list name="esl_bridge" default="deny">
+      <node type="allow" cidr="127.0.0.1/32"/>
+      <node type="allow" cidr="172.18.0.0/16"/>
+    </list>
+  </network-lists>
+</configuration>
