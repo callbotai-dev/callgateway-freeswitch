@@ -62,13 +62,36 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
 const convBySession = new Map(); // Guarda conversacion por session_id.
 
 app.post('/elevenlabs/webhook', (req, res) => { // Webhook ElevenLabs (via n8n).
-    if (req.get('X-ElevenLabs-Proxy') !== 'n8n') return res.status(403).json({ ok: false }); // Protege.
-    const b = req.body || {}; // Body.
-    const sessionId = b.session_id || b.sessionId || b?.data?.session_id; // Session.
-    const conversationId = b.conversation_id || b.conversationId || b?.data?.conversation_id; // Conversation.
-    if (sessionId && conversationId) convBySession.set(String(sessionId), String(conversationId)); // Guarda.
-    console.log('[ELEVENLABS][WEBHOOK]', { sessionId, conversationId }); // Log.
-    return res.json({ ok: true }); // OK.
+    if (req.get('X-ElevenLabs-Proxy') !== 'n8n') { // Solo acepta desde n8n.
+        return res.status(403).json({ ok: false });
+    }
+
+    const root = req.body || {}; // Payload n8n completo.
+    const b = root.body || root; // Si viene envuelto por n8n, usa root.body.
+
+    const sessionId =
+        b.session_id ||
+        b.sessionId ||
+        b.call_sid ||        // ElevenLabs SIP
+        b.callSid ||
+        null;
+
+    const conversationId =
+        b.conversation_id ||
+        b.conversationId ||
+        null;
+
+    if (sessionId && conversationId) {
+        convBySession.set(String(sessionId), String(conversationId)); // Guarda relación.
+    }
+
+    console.log('[ELEVENLABS][WEBHOOK]', {
+        sessionId,
+        conversationId,
+        payloadKeys: Object.keys(b),
+    });
+
+    return res.json({ ok: true }); // Respuesta rápida.
 });
 
 app.post('/kill-conversation', async (req, res) => { // Mata conversación ElevenLabs.
