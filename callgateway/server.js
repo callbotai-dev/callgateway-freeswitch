@@ -40,8 +40,15 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
 
         const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
-        if (r.status === 'answered') return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
-        return res.json({ success: false, message: r.status }); // Resto.
+        if (r.status === 'answered') { // Contestó.
+            return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
+        }
+        return res.json({ // No answered.
+            success: false, // KO.
+            message: r.status, // Ej: no_answer / hangup / timeout.
+            provider_call_id: r.meta && r.meta.uuid, // UUID si existe.
+            hangup: r.meta && (r.meta.hangup || r.meta.hangup_cause), // Causa si la tenemos.
+        }); // Fin.
     } catch (e) { // Captura fallo inesperado.
         console.error('[HTTP] /dial error:', e && (e.stack || e.message || e)); // Log real.
         return res.status(500).json({ // Respuesta.
