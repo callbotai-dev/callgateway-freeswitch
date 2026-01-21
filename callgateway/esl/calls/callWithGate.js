@@ -4,7 +4,8 @@ const { originate } = require('./originate'); // Origina llamada.
 const { hangup } = require('./hangup'); // Cuelga llamada.
 const { waitForAnswerOrHangup } = require('./waitForAnswerOrHangup'); // Espera ANSWER/HANGUP.
 const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras ANSWER.
-const { connect } = require('../connection'); // Conexión ESL para ejecutar comandos API.
+const { connect } = require('../connection/connect'); // Conexión ESL (ruta real).
+
 
 
 /**
