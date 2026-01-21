@@ -59,7 +59,7 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
     } // Fin catch.
 }); // Fin endpoint.
 
-const convBySession = new Map(); // Guarda conversacion por session_id.
+const convBySession = new Map(); // Guarda conversacion por session_id
 
 app.post('/elevenlabs/webhook', (req, res) => { // Webhook ElevenLabs (via n8n).
     if (req.get('X-ElevenLabs-Proxy') !== 'n8n') { // Solo acepta desde n8n.
