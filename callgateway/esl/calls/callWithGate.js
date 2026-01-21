@@ -16,57 +16,58 @@ const { connect } = require('../connection/connect'); // Conexión ESL (ruta rea
  */
 async function callWithGate(toE164, opts = {}) { // Función principal.
     const t0 = Date.now(); // Timestamp inicio.
-    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? process.env.GATE_RING_TIMEOUT_SEC ?? 12); // Segundos máx. de ring (12≈4–5 tonos típico).
-    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? process.env.GATE_ANSWER_TIMEOUT_MS ?? ((ringTimeoutSec + 2) * 1000)); // Ventana espera ANSWER.
-    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout monitor post-ANSWER.
+    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? process.env.GATE_RING_TIMEOUT_SEC ?? 12); // Segundos máx ring.
+    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? process.env.GATE_ANSWER_TIMEOUT_MS ?? ((ringTimeoutSec + 2) * 1000)); // Ventana espera.
+    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout post-ANSWER.
 
-
-    let uuid = ''; // UUID del canal.
-    try { // Bloque originate.
-        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina y obtiene UUID.
-    } catch (e) { // Errores de originate.
-        const msg = String(e?.message || e); // Normaliza mensaje.
+    let uuid = ''; // UUID canal.
+    try { // Originate.
+        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina.
+    } catch (e) { // Errores originate.
+        const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
-
         if (msg.includes('NO_ANSWER')) return { status: 'no_answer', ms, meta: { reason: 'originate_no_answer' } }; // No contestó.
-        if (msg.includes('USER_BUSY') || msg.includes('CALL_REJECTED')) return { status: 'busy', ms, meta: { reason: msg } }; // Rechazo/ocupado.
-
-        return { status: 'error', ms, meta: { reason: `originate_failed: ${msg}` } }; // Otro error.
+        if (msg.includes('USER_BUSY') || msg.includes('CALL_REJECTED')) return { status: 'busy', ms, meta: { reason: msg } }; // Busy/rechazo.
+        return { status: 'error', ms, meta: { reason: `originate_failed: ${msg}` } }; // Otro.
     } // Fin originate.
 
-    console.log('[ESL] gate started', { uuid, ringTimeoutSec, answerTimeoutMs, inCallTimeoutMs }); // Log gate.
+    console.log('[ESL] gate started', { uuid, ringTimeoutSec, answerTimeoutMs, inCallTimeoutMs }); // Log.
 
-    let r = { status: 'error', meta: { reason: 'wait_failed' } }; // Default seguro.
-    try { // Espera segura.
-        r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera ANSWER/HANGUP/timeout.
-    } catch (e) { // Si el waiter revienta.
-        r = { status: 'hangup', meta: { hangup_cause: 'WAIT_EXCEPTION', reason: String(e?.message || e) } }; // Normaliza a hangup.
+    let r = { status: 'error', meta: { reason: 'wait_failed' } }; // Default.
+    try { // Espera.
+        r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera eventos.
+    } catch (e) { // Excepción waiter.
+        r = { status: 'hangup', meta: { hangup_cause: 'WAIT_EXCEPTION', reason: String(e?.message || e) } }; // Normaliza.
     } // Fin wait.
 
-    const ms = Date.now() - t0; // Duración total.
-    const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag visto ANSWER.
+    const ms = Date.now() - t0; // Duración.
+    const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
 
-    if (r.status === 'answered') { // Si contestó.
+    if (r.status === 'answered') { // Contestó.
+        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Log.
+
         const c = await connect(); // Conexión ESL.
-        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promesa API.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica.
             c.api(cmd, (res) => { // Ejecuta.
                 const body = String(res?.getBody?.() || ''); // Respuesta.
                 if (body.startsWith('-ERR')) return reject(new Error(body)); // Error.
                 resolve(body); // OK.
-            });
-        });
+            }); // Fin c.api.
+        }); // Fin apiAsync.
 
         const sessionId =
-            opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId robusto.
+            opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId.
 
-        const elevenUri = process.env.ELEVEN_SIP_URI; // Destino SIP.
+        const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
 
-        const dial = `{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`; // Dialstring con header.
+        const dial = `{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`; // Dialstring.
         console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial }); // Log.
-        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Handoff real.
-        console.log('[ESL] handoff < OK'); // Log OK.
+        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere a ElevenLabs.
+        console.log('[ESL] handoff < OK'); // Log.
 
+        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor.
+        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // ✅ IMPORTANT: return aquí.
     } // Fin answered.
 
     if (r.status === 'hangup') { // Colgó antes de ANSWER.
@@ -76,5 +77,6 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     await hangup(uuid).catch(() => { }); // Limpieza best-effort.
     return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'no_answer_timeout' } }; // Timeout.
 } // Fin callWithGate.
+
 
 module.exports = { callWithGate }; // Export.
