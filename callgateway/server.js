@@ -59,6 +59,16 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
     } // Fin catch.
 }); // Fin endpoint.
 
+app.post('/elevenlabs/webhook', (req, res) => { // Endpoint para recibir webhooks de ElevenLabs vía n8n.
+    const fromN8n = req.get('X-ElevenLabs-Proxy') === 'n8n'; // Verifica que viene del proxy n8n.
+    if (!fromN8n) return res.status(403).json({ ok: false }); // Bloquea llamadas directas (por ahora).
+
+    const body = req.body || {}; // Body JSON del webhook.
+    const conversationId = body.conversation_id || body.conversationId || body?.data?.conversation_id; // Intenta extraer conversation_id.
+    console.log('[ELEVENLABS][WEBHOOK]', { conversationId, body }); // Log para inspección real del payload.
+
+    return res.json({ ok: true }); // Responde rápido para no bloquear a ElevenLabs/n8n.
+}); // Fin endpoint webhook.
 
 app.post('/hangup', requireAuth, async (req, res) => {
     try {
