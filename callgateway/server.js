@@ -31,7 +31,7 @@ app.post('/dial', requireAuth, async (req, res) => {
         const { session_id, to, meta = {} } = body || {};
         if (!session_id || !to) return res.status(400).json({ error: 'missing session_id/to' });
 
-        // Origina por ESL → devuelve UUID FS
+        // Origina por ESL → devuelve UUID FS.
         const uuid = await esl.originate(to, { session_id, ...meta });
 
         return res.json({
