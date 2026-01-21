@@ -4,6 +4,8 @@ const { originate } = require('./originate'); // Origina llamada.
 const { hangup } = require('./hangup'); // Cuelga llamada.
 const { waitForAnswerOrHangup } = require('./waitForAnswerOrHangup'); // Espera ANSWER/HANGUP.
 const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras ANSWER.
+const { connect } = require('../connection'); // Conexión ESL para ejecutar comandos API.
+
 
 /**
  * Gate: limita ring (4-5 tonos aprox) y SOLO si ANSWER humano devuelve answered.
@@ -44,12 +46,13 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag visto ANSWER.
 
     if (r.status === 'answered') { // Si contestó.
+        const c = await connect(); // Obtiene conexión ESL activa.
         console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Punto de enganche ElevenLabs.
         const sessionId = opts?.session_id || opts?.sessionId || opts?.session || null; // Session id.
         const elevenUri = process.env.ELEVEN_SIP_URI; // SIP URI ElevenLabs.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Requiere config.
 
-        await c.api(`uuid_transfer ${uuid} 'bridge:{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}' inline`); // Ejecuta transfer usando la conexión ESL.
+        await c.api(`uuid_bridge ${uuid} {sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`); // Puentea a ElevenLabs con header.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
         return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
