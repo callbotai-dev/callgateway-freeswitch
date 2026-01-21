@@ -47,28 +47,26 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag visto ANSWER.
 
     if (r.status === 'answered') { // Si contestó.
-        const c = await connect(); // Obtiene conexión ESL activa.
-        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Punto de enganche ElevenLabs.
-        const sessionId = opts?.session_id || opts?.sessionId || opts?.session || null; // Session id.
-        const elevenUri = process.env.ELEVEN_SIP_URI; // SIP URI ElevenLabs.
-        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Requiere config.
-
-        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica c.api.
-            c.api(cmd, (res) => { // Ejecuta comando FS.
-                const body = String(res?.getBody?.() || ''); // Lee respuesta.
-                if (body.startsWith('-ERR')) return reject(new Error(body)); // Error FS.
+        const c = await connect(); // Conexión ESL.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promesa API.
+            c.api(cmd, (res) => { // Ejecuta.
+                const body = String(res?.getBody?.() || ''); // Respuesta.
+                if (body.startsWith('-ERR')) return reject(new Error(body)); // Error.
                 resolve(body); // OK.
             });
         });
 
+        const sessionId =
+            opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId robusto.
+
+        const elevenUri = process.env.ELEVEN_SIP_URI; // Destino SIP.
+        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
+
         const dial = `{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`; // Dialstring con header.
-        console.log('[ESL] handoff > uuid_bridge', { uuid, dial }); // Log salida.
-        const out = await apiAsync(`uuid_bridge ${uuid} ${dial}`); // Bridge a ElevenLabs.
-        console.log('[ESL] handoff <', out.trim()); // Log respuesta.
+        console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial }); // Log.
+        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Handoff real.
+        console.log('[ESL] handoff < OK'); // Log OK.
 
-
-        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
-        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
     } // Fin answered.
 
     if (r.status === 'hangup') { // Colgó antes de ANSWER.
