@@ -49,7 +49,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const elevenUri = process.env.ELEVEN_SIP_URI; // SIP URI ElevenLabs.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Requiere config.
 
-        await api(`uuid_transfer ${uuid} 'bridge:${`{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`}' inline`); // Puentea a ElevenLabs.
+        await c.api(`uuid_transfer ${uuid} 'bridge:{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}' inline`); // Ejecuta transfer usando la conexión ESL.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
         return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
