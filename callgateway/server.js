@@ -38,8 +38,28 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         const to = body.to || body.toE164 || body.phone || body.number; // Destino.
         console.log('[HTTP] /dial body:', JSON.stringify({ to, hasBody: !!req.body })); // Log.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
+        console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
+        
+        try { // Aísla si peta dentro.
+            r = await callWithGate(to, { toE164: to, meta }); // Gate.
+            console.log('[HTTP] /dial phase=after_callWithGate', { status: r && r.status, meta: r && r.meta }); // OK.
+        } catch (e) { // Si explota aquí.
+            console.error('[HTTP] /dial phase=callWithGate_THROW', e && (e.stack || e.message || e)); // Causa real.
+            throw e; // Propaga (verás 500 + log).
+        }
 
         const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
+
+        console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
+       
+        try { // Aísla si peta dentro.
+            r = await callWithGate(to, { toE164: to, meta }); // Gate.
+            console.log('[HTTP] /dial phase=after_callWithGate', { status: r && r.status, meta: r && r.meta }); // OK.
+        } catch (e) { // Si explota aquí.
+            console.error('[HTTP] /dial phase=callWithGate_THROW', e && (e.stack || e.message || e)); // Causa real.
+            throw e; // Propaga (verás 500 + log).
+        }
+
         if (r.status === 'answered') { // Contestó.
             return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
         }
