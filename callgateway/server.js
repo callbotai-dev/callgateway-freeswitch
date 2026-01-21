@@ -59,16 +59,26 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
     } // Fin catch.
 }); // Fin endpoint.
 
-app.post('/elevenlabs/webhook', (req, res) => { // Endpoint para recibir webhooks de ElevenLabs vía n8n.
-    const fromN8n = req.get('X-ElevenLabs-Proxy') === 'n8n'; // Verifica que viene del proxy n8n.
-    if (!fromN8n) return res.status(403).json({ ok: false }); // Bloquea llamadas directas (por ahora).
+const convBySession = new Map(); // Guarda conversacion por session_id.
 
-    const body = req.body || {}; // Body JSON del webhook.
-    const conversationId = body.conversation_id || body.conversationId || body?.data?.conversation_id; // Intenta extraer conversation_id.
-    console.log('[ELEVENLABS][WEBHOOK]', { conversationId, body }); // Log para inspección real del payload.
+app.post('/elevenlabs/webhook', (req, res) => { // Webhook ElevenLabs (via n8n).
+    if (req.get('X-ElevenLabs-Proxy') !== 'n8n') return res.status(403).json({ ok: false }); // Protege.
+    const b = req.body || {}; // Body.
+    const sessionId = b.session_id || b.sessionId || b?.data?.session_id; // Session.
+    const conversationId = b.conversation_id || b.conversationId || b?.data?.conversation_id; // Conversation.
+    if (sessionId && conversationId) convBySession.set(String(sessionId), String(conversationId)); // Guarda.
+    console.log('[ELEVENLABS][WEBHOOK]', { sessionId, conversationId }); // Log.
+    return res.json({ ok: true }); // OK.
+});
 
-    return res.json({ ok: true }); // Responde rápido para no bloquear a ElevenLabs/n8n.
-}); // Fin endpoint webhook.
+app.post('/kill-conversation', async (req, res) => { // Mata conversación ElevenLabs.
+    const { session_id } = req.body || {}; // Lee session.
+    const cid = convBySession.get(String(session_id)); // Busca conversation.
+    if (!cid) return res.status(404).json({ ok: false }); // No hay.
+    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${cid}`, { method: 'DELETE', headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } }); // DELETE.
+    return res.json({ ok: r.ok, conversation_id: cid }); // Devuelve.
+});
+
 
 app.post('/hangup', requireAuth, async (req, res) => {
     try {
