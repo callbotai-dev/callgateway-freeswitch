@@ -45,6 +45,12 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
 
     if (r.status === 'answered') { // Si contestó.
         console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Punto de enganche ElevenLabs.
+        const sessionId = opts?.session_id || opts?.sessionId || opts?.session || null; // Session id.
+        const elevenUri = process.env.ELEVEN_SIP_URI; // SIP URI ElevenLabs.
+        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Requiere config.
+
+        await api(`uuid_transfer ${uuid} 'bridge:${`{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`}' inline`); // Puentea a ElevenLabs.
+
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
         return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
     } // Fin answered.
