@@ -4,6 +4,8 @@ const esl = require('./esl'); // Cliente ESL (originate / hangup)
 
 const express = require('express'); // Importa Express.
 const app = express(); // Crea la app HTTP.
+app.use(express.json({ limit: '1mb' })); // Parseo JSON para req.body.
+
 
 const { callWithGate } = require('./esl/calls/callWithGate'); // Importa gate+wait ANSWER.
 
