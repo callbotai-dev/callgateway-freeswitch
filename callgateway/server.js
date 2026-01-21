@@ -30,55 +30,35 @@ app.get('/health', (req, res) => { // Endpoint salud.
 });
 
 app.post('/dial', async (req, res) => { // Endpoint /dial.
-    try { // Manejo seguro.
-        console.log('[HTTP] headers:', req.headers['content-type']); console.log('[HTTP] body_raw:', req.body); // Debug.
+    try { // Try global del handler.
+        const body = req.body || {}; // Asegura objeto.
+        const meta = body.meta || {}; // Meta opcional.
+        const to = body.to || body.toE164 || body.phone || body.number; // Destino (alias).
+        console.log('[HTTP] /dial', { ct: req.headers['content-type'], to, hasBody: !!req.body }); // Log mínimo.
 
-        const body = req.body || {}; // Body seguro.
-        const meta = body.meta || {}; // Meta seguro.
-        const to = body.to || body.toE164 || body.phone || body.number; // Destino.
-        console.log('[HTTP] /dial body:', JSON.stringify({ to, hasBody: !!req.body })); // Log.
-        if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
-        console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
-        let r; // Resultado accesible en todo el handler.
-        try { // Aísla si peta dentro.
-            r = await callWithGate(to, { toE164: to, meta }); // Gate.
-            console.log('[HTTP] /dial phase=after_callWithGate', { status: r && r.status, meta: r && r.meta }); // OK.
-        } catch (e) { // Si explota aquí.
-            console.error('[HTTP] /dial phase=callWithGate_THROW', e && (e.stack || e.message || e)); // Causa real.
-            throw e; // Propaga (verás 500 + log).
-        }
+        if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // 400 si falta to.
 
-        // const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
-       
-
-        console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
-       
-        try { // Aísla si peta dentro.
-            r = await callWithGate(to, { toE164: to, meta }); // Gate.
-            console.log('[HTTP] /dial phase=after_callWithGate', { status: r && r.status, meta: r && r.meta }); // OK.
-        } catch (e) { // Si explota aquí.
-            console.error('[HTTP] /dial phase=callWithGate_THROW', e && (e.stack || e.message || e)); // Causa real.
-            throw e; // Propaga (verás 500 + log).
-        }
+        console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca.
+        const r = await callWithGate(to, { toE164: to, meta }); // ÚNICA llamada (sin duplicar).
+        console.log('[HTTP] /dial phase=after_callWithGate', { status: r?.status, meta: r?.meta }); // Resultado.
 
         if (r.status === 'answered') { // Contestó.
             return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
-        }
-        return res.json({ // No answered.
+        } // Fin answered.
+
+        return res.json({ // No contestó / ocupado / etc.
             success: false, // KO.
-            message: r.status, // Ej: no_answer / hangup / timeout.
-            provider_call_id: r.meta && r.meta.uuid, // UUID si existe.
-            hangup: r.meta && (r.meta.hangup || r.meta.hangup_cause), // Causa si la tenemos.
-        }); // Fin.
-    } catch (e) { // Captura fallo inesperado.
+            message: r.status, // no_answer | busy | error ...
+            provider_call_id: r.meta?.uuid, // UUID si existe.
+            reason: r.meta?.reason, // Motivo.
+            hangup_cause: r.meta?.hangup_cause || r.meta?.hangupCause, // Causa FS si existe.
+        }); // Fin response.
+    } catch (e) { // Captura errores inesperados.
         console.error('[HTTP] /dial error:', e && (e.stack || e.message || e)); // Log real.
-        return res.status(500).json({ // Respuesta.
-            success: false, // KO.
-            message: 'dial_error', // Código estable.
-            detail: String(e && (e.message || e)).slice(0, 200), // Detalle corto.
-        }); // Fin json.
+        return res.status(500).json({ success: false, message: 'dial_error', detail: String(e?.message || e).slice(0, 200) }); // 500 estable.
     } // Fin catch.
 }); // Fin endpoint.
+
 
 app.post('/hangup', requireAuth, async (req, res) => {
     try {

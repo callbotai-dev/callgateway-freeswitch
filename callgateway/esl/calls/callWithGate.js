@@ -1,56 +1,59 @@
 'use strict'; // Modo estricto.
 
-const { originate } = require('./originate'); // Origina.
-const { hangup } = require('./hangup'); // Cuelga.
-const { waitForAnswerOrHangup } = require('./waitForAnswerOrHangup'); // Espera answer/hangup.
-const { waitForHangup } = require('./waitForHangup'); // Monitor hangup.
+const { originate } = require('./originate'); // Origina llamada.
+const { hangup } = require('./hangup'); // Cuelga llamada.
+const { waitForAnswerOrHangup } = require('./waitForAnswerOrHangup'); // Espera ANSWER/HANGUP.
+const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras ANSWER.
 
 /**
- * Gate: 4-5 tonos + handoff.
- * @param {string} toE164 - destino.
- * @param {object} opts - opciones.
- * @returns {Promise<object>} resultado.
+ * Gate: limita ring (4-5 tonos aprox) y SOLO si ANSWER humano devuelve answered.
+ * @param {string} toE164 - Destino (E.164 o similar).
+ * @param {object} opts - Opciones.
+ * @returns {Promise<{status:string, ms:number, meta:object, monitor?:Promise<any>}>} Resultado.
  */
-async function callWithGate(toE164, opts = {}) { // ÚNICA función.
-    const t0 = Date.now(); // Inicio.
-    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? 22); // 4-5 tonos.
-    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? ((ringTimeoutSec + 2) * 1000)); // Ventana.
-    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? 60000); // Monitor (diag).
+async function callWithGate(toE164, opts = {}) { // Función principal.
+    const t0 = Date.now(); // Timestamp inicio.
+    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? 22); // Timeout originate (ajusta tonos).
+    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? ((ringTimeoutSec + 2) * 1000)); // Ventana de espera.
+    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? 60000); // Monitor debug.
 
-    let uuid = ''; // UUID.
-    try { // Originate.
-        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Llama.
-    } catch (e) { // Error originate.
-        const msg = String(e?.message || e); // Normaliza.
+    let uuid = ''; // UUID del canal.
+    try { // Bloque originate.
+        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina y obtiene UUID.
+    } catch (e) { // Errores de originate.
+        const msg = String(e?.message || e); // Normaliza mensaje.
         const ms = Date.now() - t0; // Duración.
-        if (msg.includes('NO_ANSWER')) return { status: 'no_answer', ms, meta: { reason: 'originate_no_answer' } }; // No contesta.
-        return { status: 'error', ms, meta: { reason: msg } }; // Otro error.
+
+        if (msg.includes('NO_ANSWER')) return { status: 'no_answer', ms, meta: { reason: 'originate_no_answer' } }; // No contestó.
+        if (msg.includes('USER_BUSY') || msg.includes('CALL_REJECTED')) return { status: 'busy', ms, meta: { reason: msg } }; // Rechazo/ocupado.
+
+        return { status: 'error', ms, meta: { reason: `originate_failed: ${msg}` } }; // Otro error.
     } // Fin originate.
 
-    console.log('[ESL] gate started', { uuid, ringTimeoutSec, answerTimeoutMs, inCallTimeoutMs }); // Log.
+    console.log('[ESL] gate started', { uuid, ringTimeoutSec, answerTimeoutMs, inCallTimeoutMs }); // Log gate.
 
-    let r = { status: 'error', meta: { reason: 'wait_failed' } }; // Default.
+    let r = { status: 'error', meta: { reason: 'wait_failed' } }; // Default seguro.
     try { // Espera segura.
-        r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera decisión.
-    } catch (e) { // Si revienta.
-        r = { status: 'hangup', meta: { hangup_cause: 'WAIT_EXCEPTION', err: String(e?.message || e) } }; // Normaliza.
-    }
+        r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera ANSWER/HANGUP/timeout.
+    } catch (e) { // Si el waiter revienta.
+        r = { status: 'hangup', meta: { hangup_cause: 'WAIT_EXCEPTION', reason: String(e?.message || e) } }; // Normaliza a hangup.
+    } // Fin wait.
 
-    const ms = Date.now() - t0; // Duración.
-    const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
+    const ms = Date.now() - t0; // Duración total.
+    const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag visto ANSWER.
 
-    if (r.status === 'answered') { // Contestó.
-        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Log.
-        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor.
-        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // OK.
+    if (r.status === 'answered') { // Si contestó.
+        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Punto de enganche ElevenLabs.
+        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
+        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
     } // Fin answered.
 
-    if (r.status === 'hangup') { // Colgó antes de contestar.
-        return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'hangup_before_answer', ...r.meta } }; // No contesta.
+    if (r.status === 'hangup') { // Colgó antes de ANSWER.
+        return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'hangup_before_answer', ...r.meta } }; // Normaliza.
     } // Fin hangup.
 
-    await hangup(uuid).catch(() => { }); // Limpieza.
-    return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'no_answer_timeout' } }; // No contesta.
+    await hangup(uuid).catch(() => { }); // Limpieza best-effort.
+    return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'no_answer_timeout' } }; // Timeout.
 } // Fin callWithGate.
 
-module.exports = { callWithGate }; // Exporta.
+module.exports = { callWithGate }; // Export.
