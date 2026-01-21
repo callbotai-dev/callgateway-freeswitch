@@ -31,6 +31,8 @@ app.get('/health', (req, res) => { // Endpoint salud.
 
 app.post('/dial', async (req, res) => { // Endpoint /dial.
     try { // Manejo seguro.
+        console.log('[HTTP] headers:', req.headers['content-type']); console.log('[HTTP] body_raw:', req.body); // Debug.
+
         const body = req.body || {}; // Body seguro.
         const meta = body.meta || {}; // Meta seguro.
         const to = body.to || body.toE164 || body.phone || body.number; // Destino.
