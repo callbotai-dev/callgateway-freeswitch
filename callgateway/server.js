@@ -39,7 +39,7 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         console.log('[HTTP] /dial body:', JSON.stringify({ to, hasBody: !!req.body })); // Log.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
         console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
-        
+        let r; // Resultado accesible en todo el handler.
         try { // Aísla si peta dentro.
             r = await callWithGate(to, { toE164: to, meta }); // Gate.
             console.log('[HTTP] /dial phase=after_callWithGate', { status: r && r.status, meta: r && r.meta }); // OK.
@@ -48,7 +48,8 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
             throw e; // Propaga (verás 500 + log).
         }
 
-        const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
+        // const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
+       
 
         console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca inicio.
        
