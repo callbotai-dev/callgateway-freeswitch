@@ -13,9 +13,10 @@ const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras 
  */
 async function callWithGate(toE164, opts = {}) { // Función principal.
     const t0 = Date.now(); // Timestamp inicio.
-    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? 22); // Timeout originate (ajusta tonos).
-    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? ((ringTimeoutSec + 2) * 1000)); // Ventana de espera.
-    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? 60000); // Monitor debug.
+    const ringTimeoutSec = Number(opts.ringTimeoutSec ?? process.env.GATE_RING_TIMEOUT_SEC ?? 12); // Segundos máx. de ring (12≈4–5 tonos típico).
+    const answerTimeoutMs = Number(opts.answerTimeoutMs ?? process.env.GATE_ANSWER_TIMEOUT_MS ?? ((ringTimeoutSec + 2) * 1000)); // Ventana espera ANSWER.
+    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout monitor post-ANSWER.
+
 
     let uuid = ''; // UUID del canal.
     try { // Bloque originate.
