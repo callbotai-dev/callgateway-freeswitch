@@ -29,7 +29,13 @@ async function callWithGate(toE164, opts = {}) { // ÚNICA función.
 
     console.log('[ESL] gate started', { uuid, ringTimeoutSec, answerTimeoutMs, inCallTimeoutMs }); // Log.
 
-    const r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera decisión.
+    let r = { status: 'error', meta: { reason: 'wait_failed' } }; // Default.
+    try { // Espera segura.
+        r = await waitForAnswerOrHangup(uuid, answerTimeoutMs); // Espera decisión.
+    } catch (e) { // Si revienta.
+        r = { status: 'hangup', meta: { hangup_cause: 'WAIT_EXCEPTION', err: String(e?.message || e) } }; // Normaliza.
+    }
+
     const ms = Date.now() - t0; // Duración.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
 
