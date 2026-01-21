@@ -5,6 +5,8 @@ const esl = require('./esl'); // Cliente ESL (originate / hangup)
 const express = require('express'); // Importa Express.
 const app = express(); // Crea la app HTTP.
 
+const { callWithGate } = require('./esl/calls/callWithGate'); // Importa gate+wait ANSWER.
+
 app.use(express.urlencoded({ extended: false })); // Acepta x-www-form-urlencoded.
 app.use(express.text({ type: '*/*', limit: '256kb' })); // Fallback texto crudo.
 
@@ -25,27 +27,18 @@ app.get('/health', (req, res) => { // Endpoint salud.
     res.json({ ok: true, service: 'callgateway' }); // Respuesta.
 });
 
-app.post('/dial', requireAuth, async (req, res) => {
-    try {
-        const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-        const { session_id, to, meta = {} } = body || {};
-        if (!session_id || !to) return res.status(400).json({ error: 'missing session_id/to' });
-
-        // Origina por ESL → devuelve UUID FS.
-        const uuid = await esl.originate(to, { session_id, ...meta });
-
-        return res.json({
-            provider: 'freeswitch',
-            provider_call_id: uuid,
-            status: 'queued',
-            session_id,
-            to,
-            meta,
-        });
-    } catch (e) {
-        return res.status(500).json({ error: 'dial_failed', detail: String(e.message || e) });
-    }
-});
+app.post('/dial', async (req, res) => { // Endpoint /dial.
+    try { // Manejo seguro de errores.
+        const { to, meta } = req.body || {}; // Lee destino y metadatos.
+        const r = await callWithGate(to, { meta }); // Llama con gate y espera ANSWER/HANGUP.
+        if (r.status === 'answered') { // Solo si hubo ANSWER humano.
+            return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
+        } // Fin answered.
+        return res.json({ success: false, message: r.status }); // Resto de casos.
+    } catch (e) { // Captura fallo inesperado.
+        return res.status(500).json({ success: false, message: 'dial_error' }); // Respuesta estable.
+    } // Fin catch.
+}); // Fin endpoint.
 
 app.post('/hangup', requireAuth, async (req, res) => {
     try {
