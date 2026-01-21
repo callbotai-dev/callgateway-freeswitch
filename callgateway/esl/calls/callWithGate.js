@@ -53,7 +53,19 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const elevenUri = process.env.ELEVEN_SIP_URI; // SIP URI ElevenLabs.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Requiere config.
 
-        await c.api(`uuid_bridge ${uuid} {sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`); // Puentea a ElevenLabs con header.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica c.api.
+            c.api(cmd, (res) => { // Ejecuta comando FS.
+                const body = String(res?.getBody?.() || ''); // Lee respuesta.
+                if (body.startsWith('-ERR')) return reject(new Error(body)); // Error FS.
+                resolve(body); // OK.
+            });
+        });
+
+        const dial = `{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`; // Dialstring con header.
+        console.log('[ESL] handoff > uuid_bridge', { uuid, dial }); // Log salida.
+        const out = await apiAsync(`uuid_bridge ${uuid} ${dial}`); // Bridge a ElevenLabs.
+        console.log('[ESL] handoff <', out.trim()); // Log respuesta.
+
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor para evitar huérfanas.
         return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve OK.
