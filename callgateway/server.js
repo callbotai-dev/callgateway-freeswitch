@@ -36,7 +36,12 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         } // Fin answered.
         return res.json({ success: false, message: r.status }); // Resto de casos.
     } catch (e) { // Captura fallo inesperado.
-        return res.status(500).json({ success: false, message: 'dial_error' }); // Respuesta estable.
+        console.error('[HTTP] /dial error:', e && (e.stack || e.message || e)); // Log real.
+        return res.status(500).json({ // Respuesta.
+            success: false, // KO.
+            message: 'dial_error', // Código estable.
+            detail: String(e && (e.message || e)).slice(0, 200), // Detalle corto.
+        }); // Fin json.
     } // Fin catch.
 }); // Fin endpoint.
 
