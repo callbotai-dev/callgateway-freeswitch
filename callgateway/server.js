@@ -29,7 +29,10 @@ app.get('/health', (req, res) => { // Endpoint salud.
 
 app.post('/dial', async (req, res) => { // Endpoint /dial.
     try { // Manejo seguro de errores.
-        const { to, meta } = req.body || {}; // Lee destino y metadatos.
+        const body = req.body || {}; // Body seguro.
+        const to = body.to || body.toE164 || body.phone || body.number; // Acepta alias.
+        if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
+        const meta = body.meta || {}; // Meta opcional.
         const r = await callWithGate(to, { meta }); // Llama con gate y espera ANSWER/HANGUP.
         if (r.status === 'answered') { // Solo si hubo ANSWER humano.
             return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
