@@ -28,16 +28,16 @@ app.get('/health', (req, res) => { // Endpoint salud.
 });
 
 app.post('/dial', async (req, res) => { // Endpoint /dial.
-    try { // Manejo seguro de errores.
+    try { // Manejo seguro.
         const body = req.body || {}; // Body seguro.
-        const to = body.to || body.toE164 || body.phone || body.number; // Acepta alias.
+        const meta = body.meta || {}; // Meta seguro.
+        const to = body.to || body.toE164 || body.phone || body.number; // Destino.
+        console.log('[HTTP] /dial body:', JSON.stringify({ to, hasBody: !!req.body })); // Log.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // Corta.
-        const meta = body.meta || {}; // Meta opcional.
-        const r = await callWithGate(to, { meta }); // Llama con gate y espera ANSWER/HANGUP.
-        if (r.status === 'answered') { // Solo si hubo ANSWER humano.
-            return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
-        } // Fin answered.
-        return res.json({ success: false, message: r.status }); // Resto de casos.
+
+        const r = await callWithGate(to, { toE164: to, meta }); // Pasa ambos.
+        if (r.status === 'answered') return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
+        return res.json({ success: false, message: r.status }); // Resto.
     } catch (e) { // Captura fallo inesperado.
         console.error('[HTTP] /dial error:', e && (e.stack || e.message || e)); // Log real.
         return res.status(500).json({ // Respuesta.
