@@ -72,10 +72,7 @@ app.post('/elevenlabs/webhook', async (req, res) => {
 
     const root = req.body || {};
     const b = root.body || root;
-    return res.json({
-        b,
-        root,
-    });
+    
     const conversationId = b.conversation_id || b.conversationId || null;
 
     // UUID FS: viene como caller_id (confirmado)
