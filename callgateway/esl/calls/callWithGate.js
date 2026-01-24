@@ -71,36 +71,26 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             });
         });
 
-        const sessionId =
-            opts?.session_id ??
-            opts?.sessionId ??
-            opts?.meta?.session_id ??
-            opts?.meta?.sessionId ??
-            null;
+        const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
+        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
 
-        const elevenUri = process.env.ELEVEN_SIP_URI;
-        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI');
+        // Lee sid ya inyectado en originate()
+        const sidRaw = await apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // Recupera var.
+        const sid = sidRaw && sidRaw !== '_undef_' ? String(sidRaw).trim() : ''; // Normaliza.
+        if (!sid) throw new Error('Missing callgateway_session_id on channel'); // Guard.
 
-        const sid = String(sessionId || '');
-        if (!sid) throw new Error('Missing session_id');
+        // CallerID = UUID (para que el webhook traiga UUID)
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // UUID en caller_id.
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`); // Nombre fijo.
 
-        // 🔑 CLAVE: exportar la variable al B-leg
-        await apiAsync(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
-        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
-        console.log('[ESL] setvar+export callgateway_session_id', { uuid, sid });
-
-        // CallerID = UUID (lo que recibe ElevenLabs)
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`);
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`);
-
-        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`;
+        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`; // Header opcional.
         console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial });
 
-        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`);
-        console.log('[ESL] handoff < OK');
+        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere.
+        console.log('[ESL] handoff < OK'); // Log.
 
-        const monitor = waitForHangup(uuid, inCallTimeoutMs);
-        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor };
+        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor.
+        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // OK.
     }
 
     if (r.status === 'hangup') { // Colgó antes de ANSWER.
