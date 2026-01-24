@@ -39,7 +39,7 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // 400 si falta to.
 
         console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca.
-        const r = await callWithGate(to, { toE164: to, meta }); // ÚNICA llamada (sin duplicar).
+        const r = await callWithGate(to, { toE164: to, body }); // ÚNICA llamada (sin duplicar).
         console.log('[HTTP] /dial phase=after_callWithGate', { status: r?.status, meta: r?.meta }); // Resultado.
 
         if (r.status === 'answered') { // Contestó.
@@ -102,6 +102,12 @@ app.post('/kill-conversation', async (req, res) => { // Mata conversación Eleve
     return res.json({ ok: r.ok, conversation_id: cid }); // Devuelve.
 });
 
+app.get('/conversation', (req, res) => { // Consulta conversation_id por session_id.
+    const sessionId = String(req.query.session_id || ''); // Lee query.
+    if (!sessionId) return res.status(400).json({ ok: false, message: 'missing_session_id' }); // Valida.
+    const conversation_id = convBySession.get(sessionId) || null; // Busca.
+    return res.json({ ok: Boolean(conversation_id), session_id: sessionId, conversation_id }); // Responde.
+});
 
 app.post('/hangup', requireAuth, async (req, res) => {
     try {
