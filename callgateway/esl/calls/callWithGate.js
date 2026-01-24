@@ -63,7 +63,12 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
 
-        // CallerID = UUID (para que ElevenLabs envíe UUID en caller_id)
+        // Lee sid ya inyectado en originate()
+        const sidRaw = await apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // Recupera var.
+        const sid = sidRaw && sidRaw !== '_undef_' ? String(sidRaw).trim() : ''; // Normaliza.
+        if (!sid) throw new Error('Missing callgateway_session_id on channel'); // Guard.
+
+        // CallerID = UUID (para que el webhook traiga UUID)
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // UUID en caller_id.
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`); // Nombre fijo.
 
