@@ -78,8 +78,7 @@ app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via
         null;
 
     const fsUuid =
-        b.caller_id ||          // ← viene del webhook (lo forzamos = UUID FS)
-        b.callerId ||
+        b.call_sid ||   // ← ESTE ES EL UUID REAL
         null;
 
     let sessionId = null;
