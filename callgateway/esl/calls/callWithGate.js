@@ -22,8 +22,6 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
 
     let uuid = ''; // UUID canal.
     try { // Originate.
-        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina.
-        // ===== EARLY SESSION BIND (ANTES DE ANSWER / WEBHOOKS) =====
         const sessionId =
             opts?.session_id ??
             opts?.sessionId ??
@@ -34,22 +32,13 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const sid = String(sessionId || '');
         if (!sid) throw new Error('Missing session_id');
 
-        const cEarly = await connect();
-        const apiEarly = (cmd) => new Promise((resolve, reject) => {
-            cEarly.api(cmd, (res) => {
-                const body = String(res?.getBody?.() || '');
-                if (body.startsWith('-ERR')) return reject(new Error(body));
-                resolve(body);
-            });
-        });
+        uuid = await originate(toE164, {
+            originate_timeout: String(ringTimeoutSec),
 
-        // Exporta al B-leg y fija la sesión MUY temprano
-        await apiEarly(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
-        await apiEarly(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
-
-        console.log('[ESL] EARLY bind callgateway_session_id', { uuid, sid });
-        // ==========================================================
-
+            // 🔑 CLAVE
+            origination_export_vars: 'callgateway_session_id',
+            callgateway_session_id: sid,
+        });       
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
