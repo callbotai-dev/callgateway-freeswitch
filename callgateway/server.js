@@ -39,7 +39,8 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // 400 si falta to.
 
         console.log('[HTTP] /dial phase=before_callWithGate', { to }); // Marca.
-        const r = await callWithGate(to, { toE164: to, body }); // ÚNICA llamada (sin duplicar).
+        const r = await callWithGate(to, { ...body, toE164: to });
+
         console.log('[HTTP] /dial phase=after_callWithGate', { status: r?.status, meta: r?.meta }); // Resultado.
 
         if (r.status === 'answered') { // Contestó.
