@@ -117,7 +117,11 @@ app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via
         payloadKeys: Object.keys(b),
     });
 
-    return res.json({ ok: true });
+    return res.json({
+        ok: true, fsUuid,
+        sessionId,
+        conversationId,
+        payloadKeys: Object.keys(b), });
 });
 
 
