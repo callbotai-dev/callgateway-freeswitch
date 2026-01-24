@@ -22,12 +22,23 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
 
     let uuid = ''; // UUID canal.
     try { // Originate.
-        const sessionId = opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId.
-        const sid = String(sessionId || '').trim(); // Normaliza.
-        if (!sid) throw new Error('Missing session_id'); // Obligatorio.
+        const sessionId =
+            opts?.session_id ??
+            opts?.sessionId ??
+            opts?.meta?.session_id ??
+            opts?.meta?.sessionId ??
+            null;
 
-        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina (sin setvars).
-      
+        const sid = String(sessionId || '');
+        if (!sid) throw new Error('Missing session_id');
+
+        uuid = await originate(toE164, {
+            originate_timeout: String(ringTimeoutSec),
+
+            // 🔑 CLAVE
+            origination_export_vars: 'callgateway_session_id',
+            callgateway_session_id: sid,
+        });       
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
