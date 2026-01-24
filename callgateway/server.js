@@ -130,6 +130,38 @@ app.post('/hangup', requireAuth, async (req, res) => {
     }
 });
 
+app.get('/resolve-session', async (req, res) => { // Resuelve session_id desde caller/called.
+    try { // Control de errores.
+        const caller = String(req.query.caller_id || ''); // +346...
+        const called = String(req.query.called_number || ''); // +34930...
+        if (!caller || !called) return res.status(400).json({ ok: false, error: 'missing_params' }); // Guard.
+
+        const { connect } = require('./esl/connection/connect'); // Importa connect.
+        const c = await connect(); // Conecta ESL.
+
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promesa API.
+            c.api(cmd, (r) => { // Ejecuta comando.
+                const b = String(r?.getBody?.() || ''); // Body.
+                if (b.startsWith('-ERR')) return reject(new Error(b)); // Error FS.
+                resolve(b); // OK.
+            });
+        });
+
+        const raw = await apiAsync('show channels as json'); // Lista canales.
+        const j = JSON.parse(raw); // Parse JSON.
+        const rows = j?.rows || []; // Filas.
+
+        const hit = rows.find(x => String(x?.caller_id_number || '') === caller && String(x?.destination_number || '') === called); // Match.
+        if (!hit?.uuid) return res.json({ ok: false, error: 'not_found' }); // No canal.
+
+        const dump = await apiAsync(`uuid_getvar ${hit.uuid} callgateway_session_id`); // Lee var.
+        const sessionId = dump.trim(); // Limpia.
+        return res.json({ ok: true, uuid: hit.uuid, session_id: sessionId || null }); // OK.
+    } catch (e) { // Catch.
+        return res.status(500).json({ ok: false, error: String(e?.message || e) }); // 500.
+    }
+});
+
 app.listen(PORT, () => { // Arranca servidor.
     console.log(`[callgateway] listening on :${PORT}`); // Log.
 });
