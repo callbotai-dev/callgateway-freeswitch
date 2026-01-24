@@ -64,7 +64,8 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
 
 const convBySession = new Map(); // Guarda conversacion por session_id
 
-app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via n8n)
+
+app.post('/elevenlabs/webhook', async (req, res) => {
     if (req.get('X-ElevenLabs-Proxy') !== 'n8n') {
         return res.status(403).json({ ok: false });
     }
@@ -72,30 +73,47 @@ app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via
     const root = req.body || {};
     const b = root.body || root;
 
-    const conversationId =
-        b.conversation_id ||
-        b.conversationId ||
-        null;
+    const conversationId = b.conversation_id || b.conversationId || null;
 
+    // UUID FS: viene como caller_id (confirmado)
     const fsUuid =
-        b.call_sid ||   // ← ESTE ES EL UUID REAL
+        b.caller_id ||
+        b.callerId ||
+        b.call_sid ||
         null;
 
     let sessionId = null;
 
     if (fsUuid) {
         try {
-            const sid = await apiAsync(`uuid_getvar ${fsUuid} callgateway_session_id`);
+            const sid = await apiAsync(
+                `uuid_getvar ${fsUuid} callgateway_session_id`
+            );
             sessionId = sid && sid !== '_undef_' ? String(sid).trim() : null;
         } catch (_) {
             sessionId = null;
         }
     }
 
+    // 🔥 KILL-SWITCH: si no hay session_id, cortar conversación YA
+    if (!sessionId && conversationId) {
+        try {
+            await fetch(
+                `https://api.elevenlabs.io/v1/conversations/${conversationId}/end`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                    },
+                }
+            );
+        } catch (_) { }
+    }
+
+    // Update Dashboard (camino feliz)
     if (sessionId && conversationId) {
         const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
         const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key simple.
-
         fetch(dashUrl, {
             method: 'POST',
             headers: {
@@ -109,18 +127,12 @@ app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via
         }).catch(() => { });
     }
 
-    console.log('[ELEVENLABS][WEBHOOK]', {
+    return res.json({
+        ok: true,
         fsUuid,
         sessionId,
         conversationId,
-        payloadKeys: Object.keys(b),
     });
-
-    return res.json({
-        ok: true, fsUuid,
-        sessionId,
-        conversationId,
-        payloadKeys: Object.keys(b), });
 });
 
 
