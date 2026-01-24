@@ -153,7 +153,19 @@ app.get('/resolve-session', async (req, res) => { // Resuelve session_id desde c
         const j = JSON.parse(raw); // Parse JSON.
         const rows = j?.rows || []; // Filas.
 
-        const hit = rows.find(x => String(x?.caller_id_number || '') === caller && String(x?.destination_number || '') === called); // Match.
+        const norm = (s) => String(s || '').replace(/[^\d]/g, ''); // deja solo dígitos
+        const callerN = norm(caller); // normaliza caller_id
+        const calledN = norm(called); // normaliza called_number
+
+        const hit = rows.find((x) => { // busca canal
+            const a = norm(x?.caller_id_number); // caller del canal
+            const b = norm(x?.destination_number); // destino del canal
+            const th = norm(x?.variable_transfer_history); // transfer_history (contiene +34930...)
+            const cad = norm(x?.variable_current_application_data); // app_data (contiene dialstring)
+            const blob = `${a}|${b}|${th}|${cad}`; // conjunto para match
+            return blob.includes(callerN) && blob.includes(calledN); // match flexible
+        }); // fin find
+        
         if (!hit?.uuid) return res.json({ ok: false, error: 'not_found' }); // No canal.
 
         const dump = await apiAsync(`uuid_getvar ${hit.uuid} callgateway_session_id`); // Lee var.
