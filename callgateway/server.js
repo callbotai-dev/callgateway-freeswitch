@@ -83,7 +83,7 @@ app.post('/elevenlabs/webhook', (req, res) => { // Webhook ElevenLabs (via n8n).
 
     if (sessionId && conversationId) {
         convBySession.set(String(sessionId), String(conversationId)); // Guarda relación.
-        const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/callbacks/elevenlabs/conversation'; // URL backend update.
+        const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
         const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key simple.
         fetch(dashUrl, { // POST backend.
             method: 'POST',
