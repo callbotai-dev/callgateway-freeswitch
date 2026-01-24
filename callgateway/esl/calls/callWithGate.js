@@ -61,7 +61,15 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
 
-        const dial = `{sip_h_X-Session-Id=${sessionId || ''}}${elevenUri}`; // Dialstring.
+        const sid = String(sessionId || ''); // Normaliza a string.
+        if (!sid) throw new Error('Missing session_id'); // Obliga a tenerlo.
+
+        // Guarda el session_id en el canal de FreeSWITCH (fuente de verdad)
+        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`); // Persistente mientras viva el canal.
+        console.log('[ESL] setvar callgateway_session_id', { uuid, sid }); // Log.
+
+        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`; // Dialstring.
+
         console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial }); // Log.
         await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere a ElevenLabs.
         console.log('[ESL] handoff < OK'); // Log.
