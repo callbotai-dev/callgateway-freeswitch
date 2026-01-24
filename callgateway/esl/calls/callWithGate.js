@@ -20,6 +20,15 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const answerTimeoutMs = Number(opts.answerTimeoutMs ?? process.env.GATE_ANSWER_TIMEOUT_MS ?? ((ringTimeoutSec + 2) * 1000)); // Ventana espera.
     const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout post-ANSWER.
 
+    const c = await connect(); // Conexión ESL.
+    const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica API.
+        c.api(cmd, (res) => { // Ejecuta comando FS.
+            const body = String(res?.getBody?.() || ''); // Body.
+            if (body.startsWith('-ERR')) return reject(new Error(body)); // Error.
+            resolve(body); // OK.
+        });
+    });
+
     let uuid = ''; // UUID canal.
     try { // Originate.
         uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina.
@@ -52,16 +61,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
 
     if (r.status === 'answered') { // Contestó.
-        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid });
-
-        const c = await connect(); // Conexión ESL.
-        const apiAsync = (cmd) => new Promise((resolve, reject) => {
-            c.api(cmd, (res) => {
-                const body = String(res?.getBody?.() || '');
-                if (body.startsWith('-ERR')) return reject(new Error(body));
-                resolve(body);
-            });
-        });
+        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid });        
 
         const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
