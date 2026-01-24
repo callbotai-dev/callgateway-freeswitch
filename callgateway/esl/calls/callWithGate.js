@@ -18,27 +18,27 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const t0 = Date.now(); // Timestamp inicio.
     const ringTimeoutSec = Number(opts.ringTimeoutSec ?? process.env.GATE_RING_TIMEOUT_SEC ?? 12); // Segundos máx ring.
     const answerTimeoutMs = Number(opts.answerTimeoutMs ?? process.env.GATE_ANSWER_TIMEOUT_MS ?? ((ringTimeoutSec + 2) * 1000)); // Ventana espera.
-    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout post-ANSWER.
-
-    const c = await connect(); // Conexión ESL.
-    const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica API.
-        c.api(cmd, (res) => { // Ejecuta comando FS.
-            const body = String(res?.getBody?.() || ''); // Body.
-            if (body.startsWith('-ERR')) return reject(new Error(body)); // Error.
-            resolve(body); // OK.
-        });
-    });
+    const inCallTimeoutMs = Number(opts.inCallTimeoutMs ?? process.env.GATE_INCALL_TIMEOUT_MS ?? 60000); // Timeout post-ANSWER.    
 
     let uuid = ''; // UUID canal.
     try { // Originate.
         uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina.
-        const sessionId = opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId.
-        const sid = String(sessionId || ''); // Normaliza.
-        if (!sid) throw new Error('Missing session_id'); // Guard.
+        const sessionId = opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null;
+        const sid = String(sessionId || '');
+        if (!sid) throw new Error('Missing session_id');
 
-        await apiAsync(`uuid_setvar ${uuid} export_vars callgateway_session_id`); // Export a B-leg.
-        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`); // Set temprano (antes del webhook).
-        console.log('[ESL] early setvar+export callgateway_session_id', { uuid, sid }); // Log.
+        const c0 = await connect();
+        const api0 = (cmd) => new Promise((resolve, reject) => {
+            c0.api(cmd, (res) => {
+                const body = String(res?.getBody?.() || '');
+                if (body.startsWith('-ERR')) return reject(new Error(body));
+                resolve(body);
+            });
+        });
+
+        await api0(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
+        await api0(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
+        console.log('[ESL] early setvar+export callgateway_session_id', { uuid, sid });
 
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
