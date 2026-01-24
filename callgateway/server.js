@@ -157,14 +157,11 @@ app.get('/resolve-session', async (req, res) => { // Resuelve session_id desde c
         const callerN = norm(caller); // normaliza caller_id
         const calledN = norm(called); // normaliza called_number
 
-        const hit = rows.find((x) => { // busca canal
-            const a = norm(x?.caller_id_number); // caller del canal
-            const b = norm(x?.destination_number); // destino del canal
-            const th = norm(x?.variable_transfer_history); // transfer_history (contiene +34930...)
-            const cad = norm(x?.variable_current_application_data); // app_data (contiene dialstring)
-            const blob = `${a}|${b}|${th}|${cad}`; // conjunto para match
-            return blob.includes(callerN) && blob.includes(calledN); // match flexible
-        }); // fin find
+        const hit = rows.find(x =>
+            String(x?.cid_num || x?.caller_id_number || x?.caller_id || '') === caller &&
+            String(x?.dest || x?.destination_number || x?.destination || '') === called
+        );
+
         
         if (!hit?.uuid) return res.json({ ok: false, error: 'not_found' }); // No canal.
 
