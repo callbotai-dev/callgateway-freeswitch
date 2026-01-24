@@ -23,23 +23,6 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     let uuid = ''; // UUID canal.
     try { // Originate.
         uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina.
-        const sessionId = opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null;
-        const sid = String(sessionId || '');
-        if (!sid) throw new Error('Missing session_id');
-
-        const c0 = await connect();
-        const api0 = (cmd) => new Promise((resolve, reject) => {
-            c0.api(cmd, (res) => {
-                const body = String(res?.getBody?.() || '');
-                if (body.startsWith('-ERR')) return reject(new Error(body));
-                resolve(body);
-            });
-        });
-
-        await api0(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
-        await api0(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
-        console.log('[ESL] early setvar+export callgateway_session_id', { uuid, sid });
-
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
@@ -72,17 +55,31 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             });
         });
 
-        const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
-        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
+        const sessionId =
+            opts?.session_id ??
+            opts?.sessionId ??
+            opts?.meta?.session_id ??
+            opts?.meta?.sessionId ??
+            null;
 
-        // Mantén el caller_id = UUID (esto sí afecta al webhook)
+        const elevenUri = process.env.ELEVEN_SIP_URI;
+        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI');
+
+        const sid = String(sessionId || '');
+        if (!sid) throw new Error('Missing session_id');
+
+        // 🔑 CLAVE: exportar la variable al B-leg
+        await apiAsync(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
+        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
+        console.log('[ESL] setvar+export callgateway_session_id', { uuid, sid });
+
+        // CallerID = UUID (lo que recibe ElevenLabs)
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`);
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`);
 
-        const sid = await apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // Lee lo ya seteado temprano.
-        const dial = `{sip_h_X-Session-Id=${String(sid || '').trim()}}${elevenUri}`;
-
+        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`;
         console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial });
+
         await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`);
         console.log('[ESL] handoff < OK');
 
