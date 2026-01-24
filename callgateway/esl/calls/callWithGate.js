@@ -22,23 +22,12 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
 
     let uuid = ''; // UUID canal.
     try { // Originate.
-        const sessionId =
-            opts?.session_id ??
-            opts?.sessionId ??
-            opts?.meta?.session_id ??
-            opts?.meta?.sessionId ??
-            null;
+        const sessionId = opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId.
+        const sid = String(sessionId || '').trim(); // Normaliza.
+        if (!sid) throw new Error('Missing session_id'); // Obligatorio.
 
-        const sid = String(sessionId || '');
-        if (!sid) throw new Error('Missing session_id');
-
-        uuid = await originate(toE164, {
-            originate_timeout: String(ringTimeoutSec),
-
-            // 🔑 CLAVE
-            origination_export_vars: 'callgateway_session_id',
-            callgateway_session_id: sid,
-        });       
+        uuid = await originate(toE164, { originate_timeout: String(ringTimeoutSec) }); // Origina (sin setvars).
+      
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
@@ -74,12 +63,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
         if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
 
-        // Lee sid ya inyectado en originate()
-        const sidRaw = await apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // Recupera var.
-        const sid = sidRaw && sidRaw !== '_undef_' ? String(sidRaw).trim() : ''; // Normaliza.
-        if (!sid) throw new Error('Missing callgateway_session_id on channel'); // Guard.
-
-        // CallerID = UUID (para que el webhook traiga UUID)
+        // CallerID = UUID (para que ElevenLabs envíe UUID en caller_id)
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // UUID en caller_id.
         await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`); // Nombre fijo.
 
