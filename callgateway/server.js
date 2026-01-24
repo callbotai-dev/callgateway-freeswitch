@@ -17,6 +17,12 @@ app.use(express.json({ limit: '256kb' })); // Parsea JSON con límite.
 const PORT = process.env.PORT || 8088; // Puerto del gateway.
 const TOKEN = process.env.GATEWAY_TOKEN || ''; // Token compartido.
 
+const pendingByUuid = new Map(); // uuid -> { sessionId, exp }
+setInterval(() => { // limpieza TTL
+    const now = Date.now();
+    for (const [k, v] of pendingByUuid) if (v.exp <= now) pendingByUuid.delete(k);
+}, 5000);
+
 function requireAuth(req, res, next) { // Middleware auth.
     if (!TOKEN) return next(); // Si no hay token, no protege (dev).
     const auth = req.header('authorization') || ''; // Lee header.
@@ -44,6 +50,15 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         const r = await callWithGate(to, { ...body, toE164: to });
 
         console.log('[HTTP] /dial phase=after_callWithGate', { status: r?.status, meta: r?.meta }); // Resultado.
+        
+        const uuid = r?.meta?.uuid ? String(r.meta.uuid) : null; // UUID FS si existe.
+        const sid = body?.session_id ? String(body.session_id) : null; // SessionId.
+
+        if (uuid && sid) { // Solo si ambos existen.
+            pendingByUuid.set(uuid, { sessionId: sid, exp: Date.now() + 10 * 60 * 1000 }); // 10 min.
+            console.log('[HTTP] /dial pendingByUuid set', { uuid, sid }); // Log.
+        }
+
 
         if (r.status === 'answered') { // Contestó.
             return res.json({ success: true, provider_call_id: r.meta.uuid, message: 'answered' }); // OK.
@@ -65,6 +80,80 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
 const convBySession = new Map(); // Guarda conversacion por session_id
 
 
+// app.post('/elevenlabs/webhook', async (req, res) => {
+//     if (req.get('X-ElevenLabs-Proxy') !== 'n8n') {
+//         return res.status(403).json({ ok: false });
+//     }
+//     const row = pendingByUuid.get(String(fsUuid));
+//     const sessionId = row?.sessionId || null;
+//     return res.json({
+//         sessionId,
+//     });
+//     const root = req.body || {};
+//     const b = root.body || root;
+    
+//     const conversationId = b.conversation_id || b.conversationId || null;
+
+//     // UUID FS: viene como caller_id (confirmado)
+//     const fsUuid =
+//         b.caller_id ||
+//         b.callerId ||
+//         b.call_sid ||
+//         null;
+
+//     let sessionId = null;
+
+//     if (fsUuid) {
+//         try {
+//             const sid = await apiAsync(
+//                 `uuid_getvar ${fsUuid} callgateway_session_id`
+//             );
+//             sessionId = sid && sid !== '_undef_' ? String(sid).trim() : null;
+//         } catch (_) {
+//             sessionId = null;
+//         }
+//     }
+
+//     // 🔥 KILL-SWITCH: si no hay session_id, cortar conversación YA
+//     if (!sessionId && conversationId) {
+//         try {
+//             await fetch(
+//                 `https://api.elevenlabs.io/v1/conversations/${conversationId}/end`,
+//                 {
+//                     method: 'POST',
+//                     headers: {
+//                         'xi-api-key': process.env.ELEVENLABS_API_KEY,
+//                     },
+//                 }
+//             );
+//         } catch (_) { }
+//     }
+
+//     // Update Dashboard (camino feliz)
+//     if (sessionId && conversationId) {
+//         const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
+//         const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key simple.
+//         fetch(dashUrl, {
+//             method: 'POST',
+//             headers: {
+//                 'Content-Type': 'application/json',
+//                 'X-CallGateway-Key': dashKey,
+//             },
+//             body: JSON.stringify({
+//                 session_id: sessionId,
+//                 conversation_id: conversationId,
+//             }),
+//         }).catch(() => { });
+//     }
+
+//     return res.json({
+//         ok: true,
+//         fsUuid,
+//         sessionId,
+//         conversationId,
+//     });
+// });
+
 app.post('/elevenlabs/webhook', async (req, res) => {
     if (req.get('X-ElevenLabs-Proxy') !== 'n8n') {
         return res.status(403).json({ ok: false });
@@ -72,69 +161,13 @@ app.post('/elevenlabs/webhook', async (req, res) => {
 
     const root = req.body || {};
     const b = root.body || root;
-    
-    const conversationId = b.conversation_id || b.conversationId || null;
 
-    // UUID FS: viene como caller_id (confirmado)
-    const fsUuid =
-        b.caller_id ||
-        b.callerId ||
-        b.call_sid ||
-        null;
+    const fsUuid = String(b.caller_id || b.callerId || '').trim(); // UUID del webhook.
+    const row = fsUuid ? pendingByUuid.get(fsUuid) : null;
+    const sessionId = row?.sessionId || null;
 
-    let sessionId = null;
-
-    if (fsUuid) {
-        try {
-            const sid = await apiAsync(
-                `uuid_getvar ${fsUuid} callgateway_session_id`
-            );
-            sessionId = sid && sid !== '_undef_' ? String(sid).trim() : null;
-        } catch (_) {
-            sessionId = null;
-        }
-    }
-
-    // 🔥 KILL-SWITCH: si no hay session_id, cortar conversación YA
-    if (!sessionId && conversationId) {
-        try {
-            await fetch(
-                `https://api.elevenlabs.io/v1/conversations/${conversationId}/end`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'xi-api-key': process.env.ELEVENLABS_API_KEY,
-                    },
-                }
-            );
-        } catch (_) { }
-    }
-
-    // Update Dashboard (camino feliz)
-    if (sessionId && conversationId) {
-        const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
-        const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key simple.
-        fetch(dashUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CallGateway-Key': dashKey,
-            },
-            body: JSON.stringify({
-                session_id: sessionId,
-                conversation_id: conversationId,
-            }),
-        }).catch(() => { });
-    }
-
-    return res.json({
-        ok: true,
-        fsUuid,
-        sessionId,
-        conversationId,
-    });
+    return res.json({ ok: true, fsUuid, sessionId });
 });
-
 
 app.post('/kill-conversation', async (req, res) => { // Mata conversación ElevenLabs.
     const { session_id } = req.body || {}; // Lee session.
