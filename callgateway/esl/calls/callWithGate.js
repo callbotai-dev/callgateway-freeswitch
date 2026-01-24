@@ -44,43 +44,48 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
 
     if (r.status === 'answered') { // Contestó.
-        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid }); // Log.
+        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid });
 
         const c = await connect(); // Conexión ESL.
-        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promisifica.
-            c.api(cmd, (res) => { // Ejecuta.
-                const body = String(res?.getBody?.() || ''); // Respuesta.
-                if (body.startsWith('-ERR')) return reject(new Error(body)); // Error.
-                resolve(body); // OK.
-            }); // Fin c.api.
-        }); // Fin apiAsync.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => {
+            c.api(cmd, (res) => {
+                const body = String(res?.getBody?.() || '');
+                if (body.startsWith('-ERR')) return reject(new Error(body));
+                resolve(body);
+            });
+        });
 
         const sessionId =
-            opts?.session_id ?? opts?.sessionId ?? opts?.meta?.session_id ?? opts?.meta?.sessionId ?? null; // SessionId.
+            opts?.session_id ??
+            opts?.sessionId ??
+            opts?.meta?.session_id ??
+            opts?.meta?.sessionId ??
+            null;
 
-        const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
-        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
+        const elevenUri = process.env.ELEVEN_SIP_URI;
+        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI');
 
-        const sid = String(sessionId || ''); // Normaliza a string.
-        if (!sid) throw new Error('Missing session_id'); // Obliga a tenerlo.
+        const sid = String(sessionId || '');
+        if (!sid) throw new Error('Missing session_id');
 
-        // Guarda el session_id en el canal de FreeSWITCH (fuente de verdad)
-        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`); // Persistente mientras viva el canal.
-        console.log('[ESL] setvar callgateway_session_id', { uuid, sid }); // Log.
+        // 🔑 CLAVE: exportar la variable al B-leg
+        await apiAsync(`uuid_setvar ${uuid} export_vars callgateway_session_id`);
+        await apiAsync(`uuid_setvar ${uuid} callgateway_session_id ${sid}`);
+        console.log('[ESL] setvar+export callgateway_session_id', { uuid, sid });
 
-        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`; // Dialstring.
+        // CallerID = UUID (lo que recibe ElevenLabs)
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`);
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`);
 
-        console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial }); // Log.
+        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`;
+        console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial });
 
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // CallerID=B-leg será el UUID.
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`);       // Nombre fijo (opcional).
+        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`);
+        console.log('[ESL] handoff < OK');
 
-        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere a ElevenLabs.
-        console.log('[ESL] handoff < OK'); // Log.
-
-        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor.
-        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // ✅ IMPORTANT: return aquí.
-    } // Fin answered.
+        const monitor = waitForHangup(uuid, inCallTimeoutMs);
+        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor };
+    }
 
     if (r.status === 'hangup') { // Colgó antes de ANSWER.
         return { status: 'no_answer', ms, meta: { uuid, sawAnswerEvent, reason: 'hangup_before_answer', ...r.meta } }; // Normaliza.
