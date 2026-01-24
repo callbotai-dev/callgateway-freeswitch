@@ -34,6 +34,8 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         const body = req.body || {}; // Asegura objeto.
         const meta = body.meta || {}; // Meta opcional.
         const to = body.to || body.toE164 || body.phone || body.number; // Destino (alias).
+        to = String(to || '').trim(); // Normaliza.
+        if (/^\d{9}$/.test(to)) to = `+34${to}`; // ES: 9 dígitos -> +34.
         console.log('[HTTP] /dial', { ct: req.headers['content-type'], to, hasBody: !!req.body }); // Log mínimo.
 
         if (!to) return res.status(400).json({ success: false, message: 'missing_to' }); // 400 si falta to.
