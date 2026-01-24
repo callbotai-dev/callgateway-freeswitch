@@ -71,6 +71,10 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`; // Dialstring.
 
         console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial }); // Log.
+
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // CallerID=B-leg será el UUID.
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`);       // Nombre fijo (opcional).
+
         await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere a ElevenLabs.
         console.log('[ESL] handoff < OK'); // Log.
 

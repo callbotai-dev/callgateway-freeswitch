@@ -64,45 +64,62 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
 
 const convBySession = new Map(); // Guarda conversacion por session_id
 
-app.post('/elevenlabs/webhook', (req, res) => { // Webhook ElevenLabs (via n8n).
-    if (req.get('X-ElevenLabs-Proxy') !== 'n8n') { // Solo acepta desde n8n.
+app.post('/elevenlabs/webhook', async (req, res) => { // Webhook ElevenLabs (via n8n)
+    if (req.get('X-ElevenLabs-Proxy') !== 'n8n') {
         return res.status(403).json({ ok: false });
     }
 
-    const root = req.body || {}; // Payload n8n completo.
-    const b = root.body || root; // Si viene envuelto por n8n, usa root.body.
-
-    const sessionId =
-        b.session_id ||
-        b.sessionId ||
-        b.call_sid ||        // ElevenLabs SIP
-        b.callSid ||
-        null;
+    const root = req.body || {};
+    const b = root.body || root;
 
     const conversationId =
         b.conversation_id ||
         b.conversationId ||
         null;
 
+    const fsUuid =
+        b.caller_id ||          // ← viene del webhook (lo forzamos = UUID FS)
+        b.callerId ||
+        null;
+
+    let sessionId = null;
+
+    if (fsUuid) {
+        try {
+            const sid = await apiAsync(`uuid_getvar ${fsUuid} callgateway_session_id`);
+            sessionId = sid && sid !== '_undef_' ? String(sid).trim() : null;
+        } catch (_) {
+            sessionId = null;
+        }
+    }
+
     if (sessionId && conversationId) {
-        convBySession.set(String(sessionId), String(conversationId)); // Guarda relación.
         const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
         const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key simple.
-        fetch(dashUrl, { // POST backend.
+
+        fetch(dashUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CallGateway-Key': dashKey },
-            body: JSON.stringify({ session_id: sessionId, conversation_id: conversationId, call_sid: b.call_sid || null }),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CallGateway-Key': dashKey,
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                conversation_id: conversationId,
+            }),
         }).catch(() => { });
     }
 
     console.log('[ELEVENLABS][WEBHOOK]', {
+        fsUuid,
         sessionId,
         conversationId,
         payloadKeys: Object.keys(b),
     });
 
-    return res.json({ ok: true }); // Respuesta rápida.
+    return res.json({ ok: true });
 });
+
 
 app.post('/kill-conversation', async (req, res) => { // Mata conversación ElevenLabs.
     const { session_id } = req.body || {}; // Lee session.
@@ -129,47 +146,6 @@ app.post('/hangup', requireAuth, async (req, res) => {
         return res.json({ ok: true, session_id, provider_call_id, reason: reason || 'hangup' });
     } catch (e) {
         return res.status(500).json({ error: 'hangup_failed', detail: String(e.message || e) });
-    }
-});
-
-app.get('/resolve-session', async (req, res) => { // Resuelve session_id desde caller/called.
-    try { // Control de errores.
-        const caller = String(req.query.caller_id || ''); // +346...
-        const called = String(req.query.called_number || ''); // +34930...
-        if (!caller || !called) return res.status(400).json({ ok: false, error: 'missing_params' }); // Guard.
-
-        const { connect } = require('./esl/connection/connect'); // Importa connect.
-        const c = await connect(); // Conecta ESL.
-
-        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Promesa API.
-            c.api(cmd, (r) => { // Ejecuta comando.
-                const b = String(r?.getBody?.() || ''); // Body.
-                if (b.startsWith('-ERR')) return reject(new Error(b)); // Error FS.
-                resolve(b); // OK.
-            });
-        });
-
-        const raw = await apiAsync('show channels as json'); // Lista canales.
-        const j = JSON.parse(raw); // Parse JSON.
-        const rows = j?.rows || []; // Filas.
-
-        const norm = (s) => String(s || '').replace(/[^\d]/g, ''); // deja solo dígitos
-        const callerN = norm(caller); // normaliza caller_id
-        const calledN = norm(called); // normaliza called_number
-
-        const hit = rows.find(x =>
-            String(x?.cid_num || x?.caller_id_number || x?.caller_id || '') === caller &&
-            String(x?.dest || x?.destination_number || x?.destination || '') === called
-        );
-
-        
-        if (!hit?.uuid) return res.json({ ok: false, error: 'not_found' }); // No canal.
-
-        const dump = await apiAsync(`uuid_getvar ${hit.uuid} callgateway_session_id`); // Lee var.
-        const sessionId = dump.trim(); // Limpia.
-        return res.json({ ok: true, uuid: hit.uuid, session_id: sessionId || null }); // OK.
-    } catch (e) { // Catch.
-        return res.status(500).json({ ok: false, error: String(e?.message || e) }); // 500.
     }
 });
 
