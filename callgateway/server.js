@@ -110,6 +110,7 @@ app.post('/elevenlabs/webhook', async (req, res) => {
         }
 
         if (sessionId && conversationId) {
+            convBySession.set(String(sessionId), String(conversationId)); // Mapea session -> conversation.
             const base = String(row?.dynamic_variables?.callback_url || b.callback_url || b.meta?.callback_url || '').trim(); // Base por llamada.
             if (base) { // Solo si existe callback_url.
                 const dashUrl = `${base.replace(/\/+$/, '')}/api/callbacks/elevenlabs/conversation`; // Ruta fija.
@@ -129,13 +130,16 @@ app.post('/elevenlabs/webhook', async (req, res) => {
     }
 });
 
+app.post('/kill-conversation', async (req, res) => {
+    const { session_id, conversation_id } = req.body || {};
+    const cid = String(conversation_id || convBySession.get(String(session_id)) || '').trim();
+    if (!cid) return res.status(400).json({ ok: false, error: 'missing_conversation_id' });
 
-app.post('/kill-conversation', async (req, res) => { // Mata conversación ElevenLabs.
-    const { session_id } = req.body || {}; // Lee session.
-    const cid = convBySession.get(String(session_id)); // Busca conversation.
-    if (!cid) return res.status(404).json({ ok: false }); // No hay.
-    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${cid}`, { method: 'DELETE', headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } }); // DELETE.
-    return res.json({ ok: r.ok, conversation_id: cid }); // Devuelve.
+    const r = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${cid}`, {
+        method: 'DELETE',
+        headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY },
+    });
+    return res.json({ ok: r.ok, conversation_id: cid });
 });
 
 app.get('/conversation', (req, res) => { // Consulta conversation_id por session_id.
