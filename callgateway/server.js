@@ -139,6 +139,9 @@ app.post('/kill-conversation', async (req, res) => {
         method: 'DELETE',
         headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY },
     });
+    const txt = await r.text();
+    console.log('[kill-conversation]', { cid, status: r.status, ok: r.ok, body: txt.slice(0, 200) });
+
     return res.json({ ok: r.ok, conversation_id: cid });
 });
 
