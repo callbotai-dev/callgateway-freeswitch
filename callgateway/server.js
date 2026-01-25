@@ -110,13 +110,17 @@ app.post('/elevenlabs/webhook', async (req, res) => {
         }
 
         if (sessionId && conversationId) {
-            const dashUrl = process.env.DASHBOARD_CONV_URL || 'https://e116dbffd0a6.ngrok-free.app/api/callbacks/elevenlabs/conversation'; // URL backend update.
-            const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; 
-            fetch(dashUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CallGateway-Key': dashKey },
-                body: JSON.stringify({ session_id: sessionId, conversation_id: conversationId, call_sid: fsUuid || null }),
-            }).catch(() => { });
+            const base = String(row?.dynamic_variables?.callback_url || b.callback_url || b.meta?.callback_url || '').trim(); // Base por llamada.
+            if (base) { // Solo si existe callback_url.
+                const dashUrl = `${base.replace(/\/+$/, '')}/api/callbacks/elevenlabs/conversation`; // Ruta fija.
+                const dashKey = process.env.DASHBOARD_CONV_KEY || '1234'; // Key.
+                fetch(dashUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CallGateway-Key': dashKey },
+                    body: JSON.stringify({ session_id: sessionId, conversation_id: conversationId, call_sid: fsUuid || null }),
+                }).catch(() => { });
+            }
+
         }
 
         return res.json({ ok: true, fsUuid, sessionId, conversationId });
