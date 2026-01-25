@@ -54,7 +54,7 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         const uuid = r?.meta?.uuid ? String(r.meta.uuid) : null; // UUID FS si existe.
         const sid = body?.session_id ? String(body.session_id) : null; // SessionId.
 
-        if (uuid && sid) { // Solo si ambos existen.
+        if (uuid && sid) { // Solo si ambos existen
             const dynamic_variables = body?.dynamic_variables || null; // Variables para ElevenLabs (si vienen).
 
             pendingByUuid.set(uuid, { sessionId: sid, dynamic_variables, exp: Date.now() + 10 * 60 * 1000 }); // TTL + vars.
