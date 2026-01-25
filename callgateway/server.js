@@ -17,7 +17,7 @@ app.use(express.json({ limit: '256kb' })); // Parsea JSON con límite.
 const PORT = process.env.PORT || 8088; // Puerto del gateway.
 const TOKEN = process.env.GATEWAY_TOKEN || ''; // Token compartido.
 
-const pendingByUuid = new Map(); // uuid -> { sessionId, exp }
+const pendingByUuid = new Map(); // uuid -> { sessionId, dynamic_variables, exp } // Guarda variables por llamada.
 setInterval(() => { // limpieza TTL
     const now = Date.now();
     for (const [k, v] of pendingByUuid) if (v.exp <= now) pendingByUuid.delete(k);
@@ -55,7 +55,10 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
         const sid = body?.session_id ? String(body.session_id) : null; // SessionId.
 
         if (uuid && sid) { // Solo si ambos existen.
-            pendingByUuid.set(uuid, { sessionId: sid, exp: Date.now() + 10 * 60 * 1000 }); // 10 min.
+            const dynamic_variables = body?.dynamic_variables || null; // Variables para ElevenLabs (si vienen).
+
+            pendingByUuid.set(uuid, { sessionId: sid, dynamic_variables, exp: Date.now() + 10 * 60 * 1000 }); // TTL + vars.
+
             console.log('[HTTP] /dial pendingByUuid set', { uuid, sid }); // Log.
         }
 
@@ -78,6 +81,14 @@ app.post('/dial', async (req, res) => { // Endpoint /dial.
 }); // Fin endpoint.
 
 const convBySession = new Map(); // Guarda conversacion por session_id.
+
+app.post('/elevenlabs/client-init', async (req, res) => { // Respuesta para webhook init de ElevenLabs via n8n.
+    const root = req.body || {}; // Soporta payload directo.
+    const b = root.body || root; // Soporta wrapper n8n.
+    const fsUuid = String(b.caller_id || b.callerId || '').trim(); // UUID = caller_id.
+    const row = fsUuid ? pendingByUuid.get(fsUuid) : null; // Busca vars por UUID.
+    return res.json({ dynamic_variables: row?.dynamic_variables || {} }); // Devuelve vars para esa conversación.
+});
 
 app.post('/elevenlabs/webhook', async (req, res) => {
     try {
