@@ -59,38 +59,54 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     const ms = Date.now() - t0; // Duración.
     const sawAnswerEvent = Boolean(r?.meta?.sawAnswerEvent); // Flag.
 
-    if (r.status === 'answered') { // Contestó.
-        console.log('[ESL] ANSWER => HANDOFF NOW', { uuid });
+    if (r.status === 'answered') { // 1 Contestó.
+        console.log('[ESL] ANSWER => ORCHESTRATOR', { uuid }); // 2 Log.
 
-        const c = await connect(); // Conexión ESL.
-        const apiAsync = (cmd) => new Promise((resolve, reject) => {
-            c.api(cmd, (res) => {
-                const body = String(res?.getBody?.() || '');
-                if (body.startsWith('-ERR')) return reject(new Error(body));
-                resolve(body);
+        const c = await connect(); // 3 Conexión ESL.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // 4 Wrapper async.
+            c.api(cmd, (res) => { // 5 Ejecuta comando ESL.
+                const body = String(res?.getBody?.() || ''); // 6 Lee respuesta.
+                if (body.startsWith('-ERR')) return reject(new Error(body)); // 7 Error FS.
+                resolve(body); // 8 OK.
             });
         });
 
-        const elevenUri = process.env.ELEVEN_SIP_URI; // URI destino.
-        if (!elevenUri) throw new Error('Missing ELEVEN_SIP_URI'); // Guard.
+        // 9 session_id: preferimos payload /dial, fallback a var del canal.
+        const session_id = String(opts?.session_id || '').trim() // 10 Desde /dial.
+            || (() => { // 11 Fallback (canal).
+                const sidRawP = apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // 12 Pide var.
+                return sidRawP; // 13 Devuelve promise (se resuelve abajo).
+            })();
 
-        // Lee sid ya inyectado en originate()
-        const sidRaw = await apiAsync(`uuid_getvar ${uuid} callgateway_session_id`); // Recupera var.
-        const sid = sidRaw && sidRaw !== '_undef_' ? String(sidRaw).trim() : ''; // Normaliza.
-        if (!sid) throw new Error('Missing callgateway_session_id on channel'); // Guard.
+        const sidRaw = typeof session_id === 'string' ? session_id : await session_id; // 14 Resuelve si era promise.
+        const sid = sidRaw && sidRaw !== '_undef_' ? String(sidRaw).trim() : ''; // 15 Normaliza.
+        if (!sid) throw new Error('Missing session_id'); // 16 Guard.
 
-        // CallerID = UUID (para que el webhook traiga UUID)
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // UUID en caller_id.
-        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`); // Nombre fijo.
+        // 17 campaign_id viene en /dial.meta.campaign_id (NO del canal).
+        const campaign_id = Number(opts?.meta?.campaign_id ?? NaN); // 18 Lee meta.
+        if (!Number.isFinite(campaign_id)) throw new Error('Missing meta.campaign_id in /dial payload'); // 19 Guard.
 
-        const dial = `{sip_h_X-Session-Id=${sid}}${elevenUri}`; // Header opcional.
-        console.log('[ESL] handoff > uuid_transfer bridge', { uuid, dial });
+        // 20 (Opcional) CallerID = UUID (trazas)
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_number ${uuid}`); // 21 UUID en caller_id.
+        await apiAsync(`uuid_setvar ${uuid} effective_caller_id_name CGW`); // 22 Nombre fijo.
 
-        await apiAsync(`uuid_transfer ${uuid} 'bridge:${dial}' inline`); // Transfiere.
-        console.log('[ESL] handoff < OK'); // Log.
+        // 23 Llama al Orchestrator interno
+        const orchRes = await fetch('http://127.0.0.1:3001/start', { // 24 URL interna.
+            method: 'POST', // 25 POST.
+            headers: { 'Content-Type': 'application/json' }, // 26 JSON.
+            body: JSON.stringify({ campaign_id, session_id: sid, uuid }), // 27 Payload.
+        });
 
-        const monitor = waitForHangup(uuid, inCallTimeoutMs); // Monitor.
-        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // OK.
+        if (!orchRes.ok) throw new Error(`Orchestrator HTTP ${orchRes.status}`); // 28 Guard.
+        const orch = await orchRes.json(); // 29 JSON respuesta.
+        if (!orch?.wav_path) throw new Error('Orchestrator missing wav_path'); // 30 Guard.
+
+        // 31 Inyecta el WAV en la llamada (leg A)
+        await apiAsync(`uuid_broadcast ${uuid} ${orch.wav_path} aleg`); // 32 Playback.
+        console.log('[ESL] uuid_broadcast OK', { uuid, wav: orch.wav_path }); // 33 Log.
+
+        const monitor = waitForHangup(uuid, inCallTimeoutMs); // 34 Monitor hangup.
+        return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // 35 OK.
     }
 
     if (r.status === 'hangup') { // Colgó antes de ANSWER.
