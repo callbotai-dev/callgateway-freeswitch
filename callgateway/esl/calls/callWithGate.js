@@ -5,7 +5,7 @@ const { hangup } = require('./hangup'); // Cuelga llamada.
 const { waitForAnswerOrHangup } = require('./waitForAnswerOrHangup'); // Espera ANSWER/HANGUP.
 const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras ANSWER.
 const { connect } = require('../connection/connect'); // Conexión ESL (ruta real).
-
+const { postCallResult } = require('../webhooks/postCallResult'); // Envía evento a n8n.
 
 
 /**
@@ -106,6 +106,22 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         console.log('[ESL] uuid_broadcast OK', { uuid, wav: orch.wav_path }); // 33 Log.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // 34 Monitor hangup.
+
+        monitor
+            .then((h) => postCallResult({ // Si cuelga ok.
+                status: 'hangup_complete', // Estado final.
+                uuid, // UUID FS.
+                session_id: sid, // Session.
+                campaign_id, // Campaign.
+                meta: { ...h }, // Meta hangup.
+            }))
+            .catch((e) => postCallResult({ // Si falla monitor/timeout.
+                status: 'hangup_monitor_error', // Error monitor.
+                uuid,
+                session_id: sid,
+                campaign_id,
+                meta: { error: String(e?.message || e) }, // Error.
+            }));
         return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // 35 OK.
     }
 
