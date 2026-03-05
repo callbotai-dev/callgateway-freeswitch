@@ -102,7 +102,19 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         if (!orch?.wav_path) throw new Error('Orchestrator missing wav_path'); // 30 Guard.
 
         // 31 Inyecta el WAV en la llamada (leg A)
-        await apiAsync(`uuid_broadcast ${uuid} ${orch.wav_path} aleg`); // 32 Playback.
+        // Selecciona WAV único compatible con el flujo actual (no rompe nada).
+        const wavPath = String( // Normaliza a string.
+            orch?.wav_path                         // Preferimos wav_path (contrato actual).
+            ?? (Array.isArray(orch?.wav_paths)     // Si hay wav_paths...
+                ? (orch.wav_paths[0] ?? '')        // ...usa el primero.
+                : '')                              // Si no, vacío.
+        ).trim(); // Quita espacios.
+
+        // Si no hay ruta válida, abortamos aquí (mejor que lanzar uuid_broadcast inválido).
+        if (!wavPath) throw new Error('orch_missing_wav_path'); // Error explícito.
+
+        // Reproduce el WAV en FreeSWITCH (misma lógica de siempre).
+        await apiAsync(`uuid_broadcast ${uuid} ${wavPath} aleg`); // Un WAV por llamada.
         console.log('[ESL] uuid_broadcast OK', { uuid, wav: orch.wav_path }); // 33 Log.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // 34 Monitor hangup.
