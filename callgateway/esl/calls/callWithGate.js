@@ -39,7 +39,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             // 🔑 CLAVE
             origination_export_vars: 'callgateway_session_id',
             callgateway_session_id: sid,
-        });       
+        });
     } catch (e) { // Errores originate.
         const msg = String(e?.message || e); // Mensaje.
         const ms = Date.now() - t0; // Duración.
@@ -95,7 +95,12 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const orchRes = await fetch('http://127.0.0.1:3001/start', { // 24 URL interna.
             method: 'POST', // 25 POST.
             headers: { 'Content-Type': 'application/json' }, // 26 JSON.
-            body: JSON.stringify({ campaign_id, session_id: sid, uuid }), // 27 Payload.
+            body: JSON.stringify({
+                campaign_id,
+                session_id: sid,
+                uuid,
+                dynamic_variables: opts?.dynamic_variables ?? {},
+            }),
         });
 
         if (!orchRes.ok) throw new Error(`Orchestrator HTTP ${orchRes.status}`); // 28 Guard.
@@ -115,7 +120,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         });
 
         // 36 Log con la lista realmente reproducida.
-        console.log('[ESL] playWavList OK', { uuid, wavs: playedList });        
+        console.log('[ESL] playWavList OK', { uuid, wavs: playedList });
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // 34 Monitor hangup.
 
