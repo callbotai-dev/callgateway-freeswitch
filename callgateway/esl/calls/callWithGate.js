@@ -122,6 +122,49 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         // 36 Log con la lista realmente reproducida.
         console.log('[ESL] playWavList OK', { uuid, wavs: playedList });
 
+        const enableBidirectional = String(process.env.CGW_ENABLE_BIDIRECTIONAL || '0') === '1'; // Lee flag desde ENV y lo convierte a booleano seguro.
+
+        if (!enableBidirectional) { // Si la fase bidireccional está desactivada, mantenemos el comportamiento actual intacto.
+            const monitor = waitForHangup(uuid, inCallTimeoutMs); // Inicia el monitor de colgado como hasta ahora.
+
+            monitor
+                .then((h) => postCallResult({ // Si la llamada termina correctamente, enviamos resultado final.
+                    status: 'hangup_complete', // Estado final normal.
+                    uuid, // UUID del canal FreeSWITCH.
+                    session_id: sid, // ID de sesión de negocio.
+                    campaign_id, // ID de campaña.
+                    meta: { ...h }, // Metadatos de colgado recibidos del monitor.
+                }))
+                .catch((e) => postCallResult({ // Si falla el monitor, enviamos error controlado.
+                    status: 'hangup_monitor_error', // Estado de error del monitor.
+                    uuid, // UUID del canal FreeSWITCH.
+                    session_id: sid, // ID de sesión de negocio.
+                    campaign_id, // ID de campaña.
+                    meta: { error: String(e?.message || e) }, // Normaliza el mensaje de error.
+                }));
+
+            return { status: 'answered', ms, meta: { uuid, sawAnswerEvent }, monitor }; // Devuelve exactamente el flujo actual sin romper nada.
+        } // Fin del modo compatible.
+
+        if (enableBidirectional) { // Activamos modo bidireccional controlado.
+            console.log('[ESL] bidirectional mode enabled', { uuid, session_id: sid, campaign_id }); // Log.
+
+            let isActive = true; // Control del bucle de conversación.
+
+            const monitor = waitForHangup(uuid, inCallTimeoutMs) // Monitor de hangup paralelo.
+                .then(() => { isActive = false; }) // Si cuelga, paramos loop.
+                .catch(() => { isActive = false; }); // Seguridad.
+
+            (async () => { // Loop aislado no bloqueante.
+                while (isActive) { // Mientras la llamada siga viva.
+                    await new Promise(r => setTimeout(r, 2000)); // Espera 2s (simula turno cliente).
+                    console.log('[ESL] loop tick', { uuid }); // Trazabilidad sin lógica aún.
+                }
+            })();
+
+            return { status: 'answered', ms, meta: { uuid, sawAnswerEvent, bidirectional: true }, monitor }; // No rompe flujo.
+        }
+
         const monitor = waitForHangup(uuid, inCallTimeoutMs); // 34 Monitor hangup.
 
         monitor
