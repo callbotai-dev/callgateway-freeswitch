@@ -15,8 +15,20 @@ async function detectSpeechInWav(wavPath) { // Analiza un WAV PCM16 y decide si 
         samples += 1; // Incrementa total de muestras.
     }
 
-    const rms = samples ? Math.sqrt(sumSquares / samples) : 0; // Calcula nivel RMS medio.
-    return { speech: rms >= 0.02, rms }; // Devuelve detección booleana y nivel medido.
+    
+    let peak = 0; // Pico absoluto máximo.
+
+    for (let i = 44; i + 1 < buf.length; i += 2) {
+        const sample = buf.readInt16LE(i) / 32768;
+        const abs = Math.abs(sample);
+        if (abs > peak) peak = abs;
+        sumSquares += sample * sample;
+        samples += 1;
+    }
+
+    const rms = samples ? Math.sqrt(sumSquares / samples) : 0;
+    const durationMs = samples ? Math.round((samples / 8000) * 1000) : 0;
+    return { speech: rms >= 0.02, rms, peak, durationMs };
 } // Fin de la función.
 
 module.exports = { detectSpeechInWav }; // Exporta la utilidad.
