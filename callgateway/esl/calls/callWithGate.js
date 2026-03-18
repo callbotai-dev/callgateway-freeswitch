@@ -149,18 +149,67 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         if (enableBidirectional) { // Activamos modo bidireccional controlado.
             console.log('[ESL] bidirectional mode enabled', { uuid, session_id: sid, campaign_id }); // Log.
 
-            let isActive = true; // Control del bucle de conversación.
+            let isActive = true; // Estado vivo del loop bidireccional.
+            const bidirectionalStartedAt = Date.now(); // Marca inicio del modo bidireccional.
+            const maxBidirectionalMs = Number(process.env.CGW_BIDIRECTIONAL_MAX_MS || inCallTimeoutMs); // Límite duro para no dejar loops colgados.
 
             const monitor = waitForHangup(uuid, inCallTimeoutMs) // Monitor de hangup paralelo.
                 .then(() => { isActive = false; }) // Si cuelga, paramos loop.
                 .catch(() => { isActive = false; }); // Seguridad.
+            const recordFile = `/tmp/cgw_${uuid}.wav`; // Ruta temporal para grabar audio del cliente.
 
-            (async () => { // Loop aislado no bloqueante.
-                while (isActive) { // Mientras la llamada siga viva.
-                    await new Promise(r => setTimeout(r, 2000)); // Espera 2s (simula turno cliente).
-                    console.log('[ESL] loop tick', { uuid }); // Trazabilidad sin lógica aún.
-                }
-            })();
+            try {
+                await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Empieza grabación del canal en FS.
+                console.log('[ESL] recording started', { uuid, recordFile }); // Log.
+            } catch (e) {
+                console.error('[ESL] recording start error', { uuid, error: String(e?.message || e) }); // No rompemos flujo.
+            }
+            (async () => { // Ejecuta el loop bidireccional en segundo plano.
+                try { // Protege el loop para no tumbar la llamada por un error interno.
+                    while (isActive) { // Mantiene vivo el loop mientras la llamada siga activa.
+                        if ((Date.now() - bidirectionalStartedAt) >= maxBidirectionalMs) { // Comprueba si se alcanzó el tiempo máximo.
+                            isActive = false; // Marca el loop como finalizado.
+                            console.log('[ESL] bidirectional loop timeout', { uuid, maxBidirectionalMs }); // Deja traza del cierre por tiempo.
+                            break; // Sale del bucle.
+                        } // Fin del control de tiempo máximo.
+
+                        await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Corta grabación para tener WAV válido.
+
+                        await new Promise((resolve) => setTimeout(resolve, 200)); // Pequeño delay para asegurar escritura en disco.
+
+                        await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Reinicia grabación para siguiente turno.
+                        try {
+                            const res = await fetch('http://127.0.0.1:3001/input', { // Llamada al Orchestrator.
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    session_id: sid, // ID de sesión.
+                                    uuid, // Canal FS.
+                                    audio_path: recordFile, // Audio grabado.
+                                }),
+                            });
+
+                            if (!res.ok) throw new Error(`HTTP ${res.status}`); // Control error HTTP.
+
+                            const data = await res.json(); // Parseo respuesta.
+                            console.log('[ESL] orchestrator input OK', { uuid, data }); // Log.
+
+                        } catch (e) {
+                            console.error('[ESL] orchestrator input error', { uuid, error: String(e?.message || e) });
+                        }
+                        console.log('[ESL] loop tick', { uuid, recordFile }); // Deja traza del loop incluyendo el fichero grabado.
+                    } // Fin del while.
+                } catch (e) { // Captura cualquier error dentro del loop.
+                    console.error('[ESL] bidirectional loop error', { uuid, error: String(e?.message || e) }); // Registra el error sin romper el proceso principal.
+                } finally { // Ejecuta limpieza siempre al salir del loop.
+                    try { // Intenta detener la grabación en FreeSWITCH.
+                        await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Para la grabación activa del canal.
+                        console.log('[ESL] recording stopped', { uuid, recordFile }); // Deja traza de parada correcta.
+                    } catch (e) { // Si falla la parada, no rompemos el flujo.
+                        console.error('[ESL] recording stop error', { uuid, error: String(e?.message || e) }); // Registra el error de parada.
+                    } // Fin del stop seguro.
+                } // Fin del finally.
+            })(); // Lanza el proceso asíncrono sin bloquear el retorno actual.
 
             return { status: 'answered', ms, meta: { uuid, sawAnswerEvent, bidirectional: true }, monitor }; // No rompe flujo.
         }
