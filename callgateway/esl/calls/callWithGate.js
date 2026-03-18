@@ -138,6 +138,9 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         const maxBidirectionalMs = Number(process.env.CGW_BIDIRECTIONAL_MAX_MS || inCallTimeoutMs); // Límite máximo.
         const recordFile = `/tmp/cgw_${uuid}.wav`; // WAV temporal.
 
+        await apiAsync(`uuid_setvar ${uuid} RECORD_READ_ONLY true`);
+        await apiAsync(`uuid_setvar ${uuid} RECORD_WRITE_ONLY false`);
+
         const monitor = waitForHangup(uuid, inCallTimeoutMs) // Monitor paralelo.
             .then((h) => { // Al colgar.
                 isActive = false; // Para loop.
@@ -165,7 +168,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                     }
 
                     await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Corta grabación actual.
-                    await new Promise((resolve) => setTimeout(resolve, 200)); // Espera escritura disco.
+                    await new Promise((resolve) => setTimeout(resolve, 1000)); // Espera escritura disco.
 
                     try { // Analiza WAV.
                         const result = await detectSpeechInWav(recordFile); // Detecta señal.
