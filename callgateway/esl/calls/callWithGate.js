@@ -63,6 +63,27 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     if (r.status === 'answered') { // Si contestó.
         console.log('[ESL] ANSWER => ORCHESTRATOR', { uuid }); // Log.
 
+        const inspectVar = async (name) => { // Lee una variable concreta del canal en FS.
+            try { // Protege lectura para no romper la llamada.
+                const value = await apiAsync(`uuid_getvar ${uuid} ${name}`); // Pide valor a FreeSWITCH.
+                return String(value || '').trim(); // Normaliza salida.
+            } catch {
+                return ''; // Si falla, devolvemos vacío.
+            }
+        };
+
+        console.log('[ESL] channel vars', { // Traza para descubrir el leg correcto.
+            uuid, // Canal actual.
+            call_uuid: await inspectVar('uuid'), // UUID propio.
+            bridge_uuid: await inspectVar('bridge_uuid'), // UUID del otro leg si existe.
+            signal_bond: await inspectVar('signal_bond'), // Relación interna entre legs.
+            call_direction: await inspectVar('call_direction'), // Dirección del canal.
+            endpoint_disposition: await inspectVar('endpoint_disposition'), // Estado endpoint.
+            current_application: await inspectVar('current_application'), // App actual en FS.
+            read_codec: await inspectVar('read_codec'), // Codec entrada.
+            write_codec: await inspectVar('write_codec'), // Codec salida.
+        });
+        
         const c = await connect(); // Abre conexión ESL.
         const apiAsync = (cmd) => new Promise((resolve, reject) => { // Wrapper async.
             c.api(cmd, (res) => { // Ejecuta comando API.
