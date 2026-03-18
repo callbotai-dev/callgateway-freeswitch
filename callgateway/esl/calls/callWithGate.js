@@ -7,6 +7,7 @@ const { waitForHangup } = require('./waitForHangup'); // Monitor de hangup tras 
 const { connect } = require('../connection/connect'); // Conexión ESL (ruta real).
 const { postCallResult } = require('../webhooks/postCallResult'); // Envía evento a n8n.
 const { playWavList } = require('../playback/playWavList'); // Reproduce uno o varios WAVs en orden.
+const { detectSpeechInWav } = require('../audio/detectSpeechInWav'); // Detector de voz en WAV.
 
 
 /**
@@ -176,6 +177,14 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                         await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Corta grabación para tener WAV válido.
 
                         await new Promise((resolve) => setTimeout(resolve, 200)); // Pequeño delay para asegurar escritura en disco.
+
+                        try {
+                            const result = await detectSpeechInWav(recordFile); // Analiza el audio grabado.
+                            console.log('[VAD]', { uuid, speech: result.speech, rms: result.rms }); // Log claro.
+
+                        } catch (e) {
+                            console.error('[VAD] error', { uuid, error: String(e?.message || e) });
+                        }
 
                         await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Reinicia grabación para siguiente turno.
                         try {
