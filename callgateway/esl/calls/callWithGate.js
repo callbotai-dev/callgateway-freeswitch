@@ -189,9 +189,10 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                                 }),
                             });
 
-                            if (!res.ok) throw new Error(`HTTP ${res.status}`); // Control error HTTP.
-
-                            const data = await res.json(); // Parseo respuesta.
+                            const rawBody = await res.text(); // Lee cuerpo real de la respuesta para diagnosticar el 400.
+                            if (!res.ok) throw new Error(`HTTP ${res.status} BODY=${rawBody}`); // Incluye detalle exacto del error.
+                            const data = rawBody ? JSON.parse(rawBody) : {}; // Parsea JSON solo si hay contenido.
+                            console.log('[ESL] orchestrator input OK', { uuid, data }); // Log correcto.
 
                             if (data?.wav_path || data?.wav_paths) { // Si el orchestrator devuelve audio.
 
