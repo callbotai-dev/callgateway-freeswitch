@@ -192,6 +192,24 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                             if (!res.ok) throw new Error(`HTTP ${res.status}`); // Control error HTTP.
 
                             const data = await res.json(); // Parseo respuesta.
+
+                            if (data?.wav_path || data?.wav_paths) { // Si el orchestrator devuelve audio.
+
+                                try {
+                                    const played = await playWavList({
+                                        apiAsync, // Reutilizamos conexión ESL.
+                                        uuid, // Canal actual.
+                                        wavPath: data?.wav_path, // Compatibilidad legacy.
+                                        wavPaths: data?.wav_paths, // Nuevo formato múltiple.
+                                    });
+
+                                    console.log('[ESL] bidirectional playback OK', { uuid, played }); // Log correcto.
+
+                                } catch (e) {
+                                    console.error('[ESL] bidirectional playback error', { uuid, error: String(e?.message || e) });
+                                }
+
+                            }
                             console.log('[ESL] orchestrator input OK', { uuid, data }); // Log.
 
                         } catch (e) {
