@@ -204,7 +204,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                 console.error('[ESL] bidirectional loop error', { uuid, error: String(e?.message || e) }); // Log.
             } finally { // Limpieza final.
                 try { // Intenta parar grabación final.
-                    await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Stop final.
+                    await apiAsync(`uuid_audio ${uuid} stop ${recordFile}`); // Stop final.
                     console.log('[ESL] recording stopped', { uuid, recordFile }); // Log.
                 } catch (e) { // Si falla.
                     console.error('[ESL] recording stop error', { uuid, error: String(e?.message || e) }); // Log.

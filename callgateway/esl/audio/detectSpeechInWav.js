@@ -8,14 +8,6 @@ async function detectSpeechInWav(wavPath) { // Analiza un WAV PCM16 y decide si 
 
     let sumSquares = 0; // Acumula energía cuadrática.
     let samples = 0; // Cuenta muestras procesadas.
-
-    for (let i = 44; i + 1 < buf.length; i += 2) { // Recorre PCM16 little-endian saltando cabecera.
-        const sample = buf.readInt16LE(i) / 32768; // Convierte muestra a rango normalizado.
-        sumSquares += sample * sample; // Suma potencia instantánea.
-        samples += 1; // Incrementa total de muestras.
-    }
-
-    
     let peak = 0; // Pico absoluto máximo.
 
     for (let i = 44; i + 1 < buf.length; i += 2) {
