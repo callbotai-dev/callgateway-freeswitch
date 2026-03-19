@@ -187,9 +187,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                         console.log('[ESL] bidirectional loop timeout', { uuid, maxBidirectionalMs }); // Log timeout.
                         break; // Sale.
                     }
-
-                    await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Corta grabación actual.
-                    await new Promise((resolve) => setTimeout(resolve, 1000)); // Espera escritura disco.
+                   
 
                     try { // Analiza WAV.
                         const result = await detectSpeechInWav(recordFile); // Detecta señal.
@@ -199,8 +197,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                     }
 
                     if (!isActive) break; // Evita reiniciar grabación si ya terminó.
-
-                    await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Reinicia grabación siguiente tramo.
+                    
                     console.log('[ESL] loop tick', { uuid, recordFile }); // Log iteración.
                 }
             } catch (e) { // Error del loop.
