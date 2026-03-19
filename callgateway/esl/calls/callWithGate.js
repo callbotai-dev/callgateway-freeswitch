@@ -63,6 +63,15 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
     if (r.status === 'answered') { // Si contestó.
         console.log('[ESL] ANSWER => ORCHESTRATOR', { uuid }); // Log.
 
+        const c = await connect(); // Abre conexión ESL antes de consultar vars o reproducir.
+        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Wrapper async.
+            c.api(cmd, (res) => { // Ejecuta comando API.
+                const body = String(res?.getBody?.() || ''); // Lee body.
+                if (body.startsWith('-ERR')) return reject(new Error(body)); // Rechaza en error.
+                resolve(body); // Resuelve en OK.
+            });
+        });
+
         const inspectVar = async (name) => { // Lee una variable concreta del canal en FS.
             try { // Protege lectura para no romper la llamada.
                 const value = await apiAsync(`uuid_getvar ${uuid} ${name}`); // Pide valor a FreeSWITCH.
@@ -82,15 +91,6 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             current_application: await inspectVar('current_application'), // App actual en FS.
             read_codec: await inspectVar('read_codec'), // Codec entrada.
             write_codec: await inspectVar('write_codec'), // Codec salida.
-        });
-
-        const c = await connect(); // Abre conexión ESL.
-        const apiAsync = (cmd) => new Promise((resolve, reject) => { // Wrapper async.
-            c.api(cmd, (res) => { // Ejecuta comando API.
-                const body = String(res?.getBody?.() || ''); // Lee body.
-                if (body.startsWith('-ERR')) return reject(new Error(body)); // Rechaza en error.
-                resolve(body); // Resuelve en OK.
-            });
         });
 
         const session_id = String(opts?.session_id || '').trim() || (() => apiAsync(`uuid_getvar ${uuid} callgateway_session_id`))(); // Obtiene session_id.
@@ -157,10 +157,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
         let isActive = true; // Estado del loop.
         const bidirectionalStartedAt = Date.now(); // Inicio del modo bidireccional.
         const maxBidirectionalMs = Number(process.env.CGW_BIDIRECTIONAL_MAX_MS || inCallTimeoutMs); // Límite máximo.
-        const recordFile = `/tmp/cgw_${uuid}.wav`; // WAV temporal.
-
-        await apiAsync(`uuid_setvar ${uuid} RECORD_READ_ONLY true`);
-        await apiAsync(`uuid_setvar ${uuid} RECORD_WRITE_ONLY false`);
+        const recordFile = `/var/lib/freeswitch/recordings/cgw/cgw_${uuid}.wav`; // WAV persistente y verificable.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs) // Monitor paralelo.
             .then((h) => { // Al colgar.
@@ -173,7 +170,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             });
 
         try { // Arranca grabación inicial.
-            await apiAsync(`uuid_audio ${uuid} start read ${recordFile}`); // Empieza a grabar.
+            await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Empieza a grabar con método validado manualmente.
             console.log('[ESL] recording started', { uuid, recordFile }); // Log.
         } catch (e) { // Si falla grabación inicial.
             console.error('[ESL] recording start error', { uuid, error: String(e?.message || e) }); // Error.
@@ -187,7 +184,6 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                         console.log('[ESL] bidirectional loop timeout', { uuid, maxBidirectionalMs }); // Log timeout.
                         break; // Sale.
                     }
-                   
 
                     try { // Analiza WAV.
                         const result = await detectSpeechInWav(recordFile); // Detecta señal.
@@ -197,14 +193,14 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
                     }
 
                     if (!isActive) break; // Evita reiniciar grabación si ya terminó.
-                    
+
                     console.log('[ESL] loop tick', { uuid, recordFile }); // Log iteración.
                 }
             } catch (e) { // Error del loop.
                 console.error('[ESL] bidirectional loop error', { uuid, error: String(e?.message || e) }); // Log.
             } finally { // Limpieza final.
                 try { // Intenta parar grabación final.
-                    await apiAsync(`uuid_audio ${uuid} stop ${recordFile}`); // Stop final.
+                    await apiAsync(`uuid_record ${uuid} stop ${recordFile}`); // Stop final del mismo archivo.
                     console.log('[ESL] recording stopped', { uuid, recordFile }); // Log.
                 } catch (e) { // Si falla.
                     console.error('[ESL] recording stop error', { uuid, error: String(e?.message || e) }); // Log.
