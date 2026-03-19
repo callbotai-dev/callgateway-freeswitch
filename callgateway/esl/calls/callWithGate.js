@@ -83,7 +83,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             read_codec: await inspectVar('read_codec'), // Codec entrada.
             write_codec: await inspectVar('write_codec'), // Codec salida.
         });
-        
+
         const c = await connect(); // Abre conexión ESL.
         const apiAsync = (cmd) => new Promise((resolve, reject) => { // Wrapper async.
             c.api(cmd, (res) => { // Ejecuta comando API.
@@ -173,7 +173,7 @@ async function callWithGate(toE164, opts = {}) { // Función principal.
             });
 
         try { // Arranca grabación inicial.
-            await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Empieza a grabar.
+            await apiAsync(`uuid_audio ${uuid} start read ${recordFile}`); // Empieza a grabar.
             console.log('[ESL] recording started', { uuid, recordFile }); // Log.
         } catch (e) { // Si falla grabación inicial.
             console.error('[ESL] recording start error', { uuid, error: String(e?.message || e) }); // Error.
