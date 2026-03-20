@@ -9,9 +9,9 @@ const { runVadLoop } = require('./runVadLoop'); // Loop VAD.
  * Ejecuta sesión bidireccional BASE (solo grabación + VAD).
  * @param {object} params
  */
-async function runBidirectionalSession({ uuid, apiAsync, sleep, detectSpeechInWav, inCallTimeoutMs, monitor }) { // Orquestador limpio.
-
-    const state = createBidirectionalState({ uuid, inCallTimeoutMs }); // Crea estado central.
+async function runBidirectionalSession({ uuid, sid, campaignId, apiAsync, sleep, detectSpeechInWav, inCallTimeoutMs, monitor }) {
+    // Crea estado base de la sesión.
+    const state = createBidirectionalState({ uuid, sid, campaignId, inCallTimeoutMs });
 
     monitor // Hook monitor.
         .then(() => { state.isActive = false; }) // Apaga loop al colgar.
