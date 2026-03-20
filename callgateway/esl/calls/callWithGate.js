@@ -10,6 +10,7 @@ const { playWavList } = require('../playback/playWavList'); // Importa la reprod
 const { detectSpeechInWav } = require('../audio/detectSpeechInWav'); // Importa el detector incremental de voz sobre WAV en crecimiento.
 const { cutWavSegment } = require('../audio/cutWavSegment'); // Importa el recorte de un segmento WAV a un fichero nuevo.
 const { transcribeTurn } = require('../stt/transcribeTurn'); // Importa el adaptador STT del turno del cliente.
+const { setTimeout: sleep } = require('node:timers/promises'); // Pausa async entre iteraciones del loop.
 
 /**
  * Gate: limita ring y solo devuelve answered si hubo ANSWER real.
@@ -169,6 +170,7 @@ async function callWithGate(toE164, opts = {}) { // Define la función principal
         const minTurnBytes = Number(process.env.CGW_MIN_TURN_BYTES || 3200); // Define el mínimo tamaño válido de turno para no enviar basura.
         let turnSeq = 0; // Guarda la secuencia de turnos válidos recortados.
         let speechSeq = 0; // Guarda la secuencia de eventos enviados al endpoint /input.
+        const vadPollMs = Number(process.env.CGW_VAD_POLL_MS || 100); // Espera entre lecturas del WAV.
 
         const monitor = waitForHangup(uuid, inCallTimeoutMs) // Arranca el monitor paralelo de hangup.
             .then((h) => { // Cuando cuelga la llamada.
@@ -183,6 +185,7 @@ async function callWithGate(toE164, opts = {}) { // Define la función principal
         try { // Intenta arrancar la grabación continua del cliente.
             await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Inicia la grabación del canal al fichero continuo.
             console.log('[ESL] recording started', { uuid, recordFile }); // Registra el inicio de la grabación.
+            await sleep(250); // Da margen inicial a FreeSWITCH para crear y empezar a llenar el WAV.
         } catch (e) { // Si falla la grabación.
             console.error('[ESL] recording start error', { uuid, error: String(e?.message || e) }); // Registra el error de inicio de grabación.
         } // Fin del try/catch de arranque de grabación.
@@ -294,6 +297,7 @@ async function callWithGate(toE164, opts = {}) { // Define la función principal
                     } // Fin del try/catch del procesamiento del loop.
 
                     if (!isActive) break; // Sale si el monitor ya desactivó el loop.
+                    await sleep(vadPollMs); // Evita loop agresivo y deja tiempo a que el WAV crezca.
                     console.log('[ESL] loop tick', { uuid, recordFile }); // Registra una iteración del loop.
                 } // Fin del while isActive.
             } catch (e) { // Captura error global del loop.
