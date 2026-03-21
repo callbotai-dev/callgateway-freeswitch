@@ -4,127 +4,146 @@ const fs = require('node:fs/promises'); // Acceso async a fichero.
 
 /**
  * Analiza solo el tramo nuevo de un WAV PCM16 mono.
- * Devuelve offsets reales donde empieza y acaba la voz dentro del bloque.
+ * Detecta voz por ventanas cortas, no por 400 muestras seguidas.
  * @param {string} wavPath
  * @param {number} lastOffset
  * @returns {Promise<{speech:boolean,rms:number,peak:number,durationMs:number,nextOffset:number,bytesRead:number,speechStartOffset:number|null,speechEndOffset:number|null}>}
  */
-async function detectSpeechInWav(wavPath, lastOffset = 44) {
-    const stat = await fs.stat(wavPath); // Tamaño actual del WAV.
+async function detectSpeechInWav(wavPath, lastOffset = 44) { // Función principal.
+    const stat = await fs.stat(wavPath); // Lee tamaño actual del fichero.
     const fileSize = Number(stat.size || 0); // Normaliza tamaño.
-    const safeOffset = Math.max(44, Number(lastOffset || 44)); // Nunca antes de cabecera.
+    const safeOffset = Math.max(44, Number(lastOffset || 44)); // Nunca lee antes de la cabecera WAV.
 
-    if (fileSize <= 44 || fileSize <= safeOffset) { // Sin audio nuevo útil.
+    if (fileSize <= 44 || fileSize <= safeOffset) { // Si aún no hay audio útil nuevo.
         return {
-            speech: false,
-            rms: 0,
-            peak: 0,
-            durationMs: 0,
-            nextOffset: fileSize,
-            bytesRead: 0,
-            speechStartOffset: null,
-            speechEndOffset: null,
+            speech: false, // No hay voz.
+            rms: 0, // Sin energía.
+            peak: 0, // Sin pico.
+            durationMs: 0, // Sin duración.
+            nextOffset: fileSize, // Próximo offset al final actual.
+            bytesRead: 0, // No se leyó nada.
+            speechStartOffset: null, // Sin inicio de voz.
+            speechEndOffset: null, // Sin fin de voz.
         };
     }
 
-    const endOffset = fileSize - ((fileSize - safeOffset) % 2); // Fuerza final par.
-    const bytesToRead = Math.max(0, endOffset - safeOffset); // Bytes legibles.
+    const endOffset = fileSize - ((fileSize - safeOffset) % 2); // Ajusta a múltiplo par para PCM16.
+    const bytesToRead = Math.max(0, endOffset - safeOffset); // Calcula bytes legibles.
 
-    if (bytesToRead <= 0) { // Sin muestras completas.
+    if (bytesToRead <= 0) { // Si no hay muestras completas.
         return {
-            speech: false,
-            rms: 0,
-            peak: 0,
-            durationMs: 0,
-            nextOffset: endOffset,
-            bytesRead: 0,
-            speechStartOffset: null,
-            speechEndOffset: null,
+            speech: false, // No hay voz.
+            rms: 0, // Sin energía.
+            peak: 0, // Sin pico.
+            durationMs: 0, // Sin duración.
+            nextOffset: endOffset, // Mantiene offset correcto.
+            bytesRead: 0, // No se leyó nada.
+            speechStartOffset: null, // Sin inicio de voz.
+            speechEndOffset: null, // Sin fin de voz.
         };
     }
 
-    const fh = await fs.open(wavPath, 'r'); // Abre fichero.
+    const fh = await fs.open(wavPath, 'r'); // Abre el WAV en modo lectura.
 
-    try {
-        const buf = Buffer.allocUnsafe(bytesToRead); // Reserva buffer.
-        const { bytesRead } = await fh.read(buf, 0, bytesToRead, safeOffset); // Lee tramo nuevo.
+    try { // Bloque protegido.
+        const buf = Buffer.allocUnsafe(bytesToRead); // Reserva buffer del tramo nuevo.
+        const { bytesRead } = await fh.read(buf, 0, bytesToRead, safeOffset); // Lee desde el último offset.
 
-        if (bytesRead <= 1) { // No hay muestras completas.
+        if (bytesRead <= 1) { // Si no hay muestras completas.
             return {
-                speech: false,
-                rms: 0,
-                peak: 0,
-                durationMs: 0,
-                nextOffset: safeOffset + bytesRead,
-                bytesRead,
-                speechStartOffset: null,
-                speechEndOffset: null,
+                speech: false, // No hay voz.
+                rms: 0, // Sin energía.
+                peak: 0, // Sin pico.
+                durationMs: 0, // Sin duración.
+                nextOffset: safeOffset + bytesRead, // Avanza lo leído.
+                bytesRead, // Devuelve bytes reales.
+                speechStartOffset: null, // Sin inicio de voz.
+                speechEndOffset: null, // Sin fin de voz.
             };
         }
 
-        let sumSquares = 0; // Energía global.
-        let samples = 0; // Número de muestras.
-        let peak = 0; // Pico máximo absoluto.
+        let sumSquares = 0; // Acumula energía global.
+        let samples = 0; // Cuenta muestras totales.
+        let peak = 0; // Guarda el pico máximo absoluto.
 
-        const sampleThreshold = Number(process.env.CGW_VAD_SAMPLE_THRESHOLD || 0.035); // Umbral por muestra.
-        const minSpeechSamples = Number(process.env.CGW_VAD_MIN_SPEECH_SAMPLES || 400); // ~25 ms a 16 kHz.
-        const hangoverSamples = Number(process.env.CGW_VAD_HANGOVER_SAMPLES || 1600); // ~100 ms a 16 kHz.
+        const sampleThreshold = Number(process.env.CGW_VAD_SAMPLE_THRESHOLD || 0.02); // Umbral por muestra más realista.
+        const windowSamples = Number(process.env.CGW_VAD_WINDOW_SAMPLES || 160); // 10 ms a 16 kHz.
+        const minActiveInWindow = Number(process.env.CGW_VAD_MIN_ACTIVE_IN_WINDOW || 16); // Mínimo de muestras activas en ventana.
+        const minSpeechWindows = Number(process.env.CGW_VAD_MIN_SPEECH_WINDOWS || 3); // Mínimo de ventanas activas para validar voz.
+        const maxSilenceWindows = Number(process.env.CGW_VAD_MAX_SILENCE_WINDOWS || 10); // Cola de silencio tolerada tras voz.
 
-        let runStartSample = -1; // Inicio provisional de racha con voz.
-        let runLength = 0; // Longitud de racha actual.
-        let speechStartSample = -1; // Primer sample real con voz válida.
-        let speechEndSample = -1; // Último sample real con voz válida.
-        let silenceAfterSpeech = 0; // Silencio tras voz detectada.
+        let speechStartSample = -1; // Inicio real de voz dentro del bloque.
+        let speechEndSample = -1; // Fin real de voz dentro del bloque.
+        let activeWindows = 0; // Cuenta ventanas activas consecutivas.
+        let silenceWindowsAfterSpeech = 0; // Cuenta ventanas silenciosas tras voz válida.
 
-        for (let i = 0; i + 1 < bytesRead; i += 2) { // Recorre PCM16 LE.
-            const sampleIndex = i / 2; // Índice de muestra.
-            const sample = buf.readInt16LE(i) / 32768; // Convierte a -1..1.
-            const abs = Math.abs(sample); // Valor absoluto.
+        for (let base = 0; base + 1 < bytesRead; base += (windowSamples * 2)) { // Recorre el bloque en ventanas cortas.
+            let activeInWindow = 0; // Cuenta muestras activas en esta ventana.
+            let windowLastSampleIndex = -1; // Última muestra válida de la ventana.
 
-            if (abs > peak) peak = abs; // Actualiza pico.
-            sumSquares += sample * sample; // Acumula energía.
-            samples += 1; // Cuenta muestra.
+            for (let i = base; i + 1 < Math.min(base + (windowSamples * 2), bytesRead); i += 2) { // Recorre muestras de la ventana.
+                const sampleIndex = i / 2; // Índice de muestra relativo al bloque.
+                const sample = buf.readInt16LE(i) / 32768; // Convierte PCM16 a float.
+                const abs = Math.abs(sample); // Valor absoluto de amplitud.
 
-            if (abs >= sampleThreshold) { // Muestra candidata a voz.
-                if (runStartSample === -1) runStartSample = sampleIndex; // Marca inicio provisional.
-                runLength += 1; // Amplía racha.
+                if (abs > peak) peak = abs; // Actualiza pico global.
+                sumSquares += sample * sample; // Suma energía global.
+                samples += 1; // Incrementa contador global.
+                windowLastSampleIndex = sampleIndex; // Guarda última muestra válida.
 
-                if (runLength >= minSpeechSamples) { // Ya es voz válida.
-                    if (speechStartSample === -1) speechStartSample = runStartSample; // Fija inicio real.
-                    speechEndSample = sampleIndex; // Actualiza fin real.
-                    silenceAfterSpeech = 0; // Resetea silencio tras voz.
+                if (abs >= sampleThreshold) activeInWindow += 1; // Cuenta muestra activa.
+            }
+
+            if (windowLastSampleIndex === -1) continue; // Si la ventana quedó vacía, la ignora.
+
+            const windowIsSpeech = activeInWindow >= minActiveInWindow; // Decide si la ventana contiene voz útil.
+
+            if (windowIsSpeech) { // Si esta ventana parece voz.
+                activeWindows += 1; // Acumula ventanas activas consecutivas.
+
+                if (activeWindows >= minSpeechWindows) { // Si ya hay continuidad suficiente.
+                    if (speechStartSample === -1) { // Si aún no había inicio fijado.
+                        const rewindWindows = minSpeechWindows - 1; // Retrocede para incluir el arranque real.
+                        const rewindSamples = rewindWindows * windowSamples; // Convierte ventanas a muestras.
+                        speechStartSample = Math.max(0, (base / 2) - rewindSamples); // Fija inicio real aproximado.
+                    }
+
+                    speechEndSample = windowLastSampleIndex; // Actualiza fin real con esta ventana.
+                    silenceWindowsAfterSpeech = 0; // Resetea silencio tras voz.
                 }
-            } else { // Muestra por debajo de umbral.
-                if (speechStartSample !== -1) { // Ya había voz válida antes.
-                    silenceAfterSpeech += 1; // Cuenta silencio posterior.
-                    if (silenceAfterSpeech <= hangoverSamples) speechEndSample = sampleIndex; // Mantiene cola útil.
+            } else { // Si la ventana no parece voz.
+                activeWindows = 0; // Rompe continuidad de voz.
+
+                if (speechStartSample !== -1) { // Si ya existía voz válida antes.
+                    silenceWindowsAfterSpeech += 1; // Cuenta silencio posterior.
+                    if (silenceWindowsAfterSpeech <= maxSilenceWindows) { // Si la cola aún es tolerable.
+                        speechEndSample = windowLastSampleIndex; // Mantiene una pequeña cola natural.
+                    }
                 }
-                runStartSample = -1; // Rompe racha provisional.
-                runLength = 0; // Resetea longitud provisional.
             }
         }
 
-        const rms = samples ? Math.sqrt(sumSquares / samples) : 0; // RMS global.
-        const durationMs = samples ? Math.round((samples / 16000) * 1000) : 0; // Duración del bloque.
-        const nextOffset = safeOffset + bytesRead; // Próximo offset.
+        const rms = samples ? Math.sqrt(sumSquares / samples) : 0; // Calcula RMS global del bloque.
+        const durationMs = samples ? Math.round((samples / 16000) * 1000) : 0; // Convierte muestras a milisegundos.
+        const nextOffset = safeOffset + bytesRead; // Calcula el siguiente offset incremental.
 
-        const speechStartOffset = speechStartSample >= 0 ? safeOffset + (speechStartSample * 2) : null; // Offset real inicio voz.
-        const speechEndOffset = speechEndSample >= 0 ? safeOffset + ((speechEndSample + 1) * 2) : null; // Offset real fin voz.
-        const speech = speechStartOffset !== null && speechEndOffset !== null && speechEndOffset > speechStartOffset; // Voz real en bloque.
+        const speechStartOffset = speechStartSample >= 0 ? safeOffset + (speechStartSample * 2) : null; // Convierte inicio a offset de bytes.
+        const speechEndOffset = speechEndSample >= 0 ? safeOffset + ((speechEndSample + 1) * 2) : null; // Convierte fin a offset de bytes.
+        const speech = speechStartOffset !== null && speechEndOffset !== null && speechEndOffset > speechStartOffset; // Decide si hubo voz real.
 
         return {
-            speech,
-            rms,
-            peak,
-            durationMs,
-            nextOffset,
-            bytesRead,
-            speechStartOffset,
-            speechEndOffset,
+            speech, // Devuelve si hubo voz real.
+            rms, // Devuelve RMS global.
+            peak, // Devuelve pico global.
+            durationMs, // Devuelve duración del bloque.
+            nextOffset, // Devuelve próximo offset.
+            bytesRead, // Devuelve bytes leídos.
+            speechStartOffset, // Devuelve inicio real de voz.
+            speechEndOffset, // Devuelve fin real de voz.
         };
-    } finally {
-        await fh.close(); // Cierra descriptor.
+    } finally { // Limpieza segura.
+        await fh.close(); // Cierra descriptor siempre.
     }
 }
 
-module.exports = { detectSpeechInWav };
+module.exports = { detectSpeechInWav }; // Exporta función.
