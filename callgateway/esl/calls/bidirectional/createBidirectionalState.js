@@ -9,6 +9,7 @@
  */
 function createBidirectionalState({ uuid, inCallTimeoutMs }) { // Fabrica el estado inicial.
     return { // Devuelve un objeto plano y centralizado.
+        uuid, // Guarda el UUID para logs y utilidades.
         isActive: true, // Controla si el loop sigue vivo.
         bidirectionalStartedAt: Date.now(), // Marca inicio del modo bidireccional.
         maxBidirectionalMs: Number(process.env.CGW_BIDIRECTIONAL_MAX_MS || inCallTimeoutMs), // Límite máximo del loop.
