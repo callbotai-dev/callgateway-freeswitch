@@ -1,33 +1,31 @@
 'use strict'; // Fuerza modo estricto.
 
-const path = require('node:path'); // Maneja rutas del sistema.
-const { mkdir } = require('node:fs/promises'); // Crea carpetas si no existen.
-const { extractTurnAudio } = require('./extractTurnAudio'); // Extrae WAV del turno detectado.
+const path = require('node:path'); // Maneja rutas.
+const { mkdir } = require('node:fs/promises'); // Crea carpetas.
+const { extractTurnAudio } = require('./extractTurnAudio'); // Extrae WAV del turno.
 
 /**
- * Loop VAD: detecta inicio y fin de turno por silencio real.
+ * Loop VAD: detecta inicio y fin real de turno.
  * @param {object} deps
  * @param {object} deps.state
  * @param {Function} deps.detectSpeechInWav
  * @param {Function} deps.sleep
  */
-async function runVadLoop({ state, detectSpeechInWav, sleep }) {
-    try {
-        while (state.isActive) {
-            if ((Date.now() - state.bidirectionalStartedAt) >= state.maxBidirectionalMs) {
-                state.isActive = false;
-                console.log('[ESL] bidirectional loop timeout', {
-                    uuid: state.uuid,
-                    maxBidirectionalMs: state.maxBidirectionalMs,
-                });
-                break;
+async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Loop principal.
+    try { // Protección global.
+        while (state.isActive) { // Mantiene la sesión viva.
+
+            if ((Date.now() - state.bidirectionalStartedAt) >= state.maxBidirectionalMs) { // Control timeout.
+                state.isActive = false; // Cierra sesión.
+                console.log('[ESL] bidirectional loop timeout', { uuid: state.uuid, maxBidirectionalMs: state.maxBidirectionalMs }); // Log timeout.
+                break; // Sale.
             }
 
-            try {
-                const result = await detectSpeechInWav(state.recordFile, state.vadOffset);
-                state.vadOffset = result.nextOffset;
+            try { // Iteración protegida.
+                const result = await detectSpeechInWav(state.recordFile, state.vadOffset); // Lee tramo nuevo.
+                state.vadOffset = result.nextOffset; // Actualiza offset global.
 
-                console.log('[VAD]', {
+                console.log('[VAD]', { // Log técnico.
                     uuid: state.uuid,
                     speech: result.speech,
                     rms: result.rms,
@@ -35,17 +33,19 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) {
                     durationMs: result.durationMs,
                     bytesRead: result.bytesRead,
                     vadOffset: state.vadOffset,
+                    speechStartOffset: result.speechStartOffset,
+                    speechEndOffset: result.speechEndOffset,
                 });
 
-                const now = Date.now();
+                const now = Date.now(); // Tiempo actual.
 
-                if (result.speech) {
-                    if (!state.speechActive) {
-                        state.speechActive = true;
-                        state.speechStartedAt = now;
-                        state.turnStartOffset = Math.max(44, state.vadOffset - result.bytesRead);
+                if (result.speech) { // Si hubo voz real en este bloque.
+                    if (!state.speechActive) { // Si arranca un turno nuevo.
+                        state.speechActive = true; // Marca turno activo.
+                        state.speechStartedAt = now; // Guarda inicio temporal.
+                        state.turnStartOffset = Math.max(44, Number(result.speechStartOffset || (state.vadOffset - result.bytesRead))); // Inicio real del turno.
 
-                        console.log('[TURN]', {
+                        console.log('[TURN]', { // Log inicio turno.
                             uuid: state.uuid,
                             event: 'speech_start',
                             speechStartedAt: state.speechStartedAt,
@@ -54,20 +54,16 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) {
                         });
                     }
 
-                    state.lastSpeechAt = now;
-                    state.lastSpeechOffset = state.vadOffset;
-                } else if (
-                    state.speechActive &&
-                    state.lastSpeechAt &&
-                    (now - state.lastSpeechAt) >= state.endSilenceMs
-                ) {
-                    const turnEndedAt = state.lastSpeechOffset || state.vadOffset;
-                    const turnBytes = Math.max(0, turnEndedAt - state.turnStartOffset);
+                    state.lastSpeechAt = now; // Guarda último instante con voz.
+                    state.lastSpeechOffset = Number(result.speechEndOffset || state.vadOffset); // Guarda último byte real con voz.
+                } else if (state.speechActive && state.lastSpeechAt && (now - state.lastSpeechAt) >= state.endSilenceMs) { // Si terminó por silencio.
+                    const turnEndedAt = Math.max(state.turnStartOffset, Number(state.lastSpeechOffset || state.vadOffset)); // Fin real del turno.
+                    const turnBytes = Math.max(0, turnEndedAt - state.turnStartOffset); // Tamaño real.
 
-                    state.speechActive = false;
+                    state.speechActive = false; // Cierra turno activo.
 
-                    if (turnBytes < state.minTurnBytes) {
-                        console.log('[TURN]', {
+                    if (turnBytes < state.minTurnBytes) { // Si es demasiado corto.
+                        console.log('[TURN]', { // Log descarte.
                             uuid: state.uuid,
                             event: 'speech_discarded',
                             turnStartOffset: state.turnStartOffset,
@@ -76,19 +72,16 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) {
                             minTurnBytes: state.minTurnBytes,
                         });
 
-                        state.turnStartOffset = turnEndedAt;
-                    } else {
-                        state.turnSeq += 1;
+                        state.turnStartOffset = turnEndedAt; // Recoloca inicio.
+                    } else { // Turno válido.
+                        state.turnSeq += 1; // Incrementa secuencia.
 
-                        const turnsDir = '/var/lib/freeswitch/recordings/cgw/turns';
-                        const outputFile = path.join(
-                            turnsDir,
-                            `${state.uuid}_turn_${state.turnSeq}.wav`
-                        );
+                        const turnsDir = '/var/lib/freeswitch/recordings/cgw/turns'; // Carpeta destino.
+                        const outputFile = path.join(turnsDir, `${state.uuid}_turn_${state.turnSeq}.wav`); // Ruta turno.
 
-                        await mkdir(turnsDir, { recursive: true });
+                        await mkdir(turnsDir, { recursive: true }); // Asegura carpeta.
 
-                        console.log('[TURN_BOUNDS]', {
+                        console.log('[TURN_BOUNDS]', { // Log límites reales.
                             uuid: state.uuid,
                             turnSeq: state.turnSeq,
                             turnStartOffset: state.turnStartOffset,
@@ -99,20 +92,20 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) {
                             lastSpeechOffset: state.lastSpeechOffset,
                         });
 
-                        await extractTurnAudio({
+                        await extractTurnAudio({ // Extrae audio.
                             recordFile: state.recordFile,
                             startOffset: state.turnStartOffset,
                             endOffset: turnEndedAt,
                             outputFile,
                         });
 
-                        console.log('[TURN_AUDIO]', {
+                        console.log('[TURN_AUDIO]', { // Log archivo generado.
                             uuid: state.uuid,
                             turnSeq: state.turnSeq,
                             outputFile,
                         });
 
-                        console.log('[TURN]', {
+                        console.log('[TURN]', { // Log turno listo.
                             uuid: state.uuid,
                             event: 'turn_ready',
                             turnSeq: state.turnSeq,
@@ -126,25 +119,21 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) {
                             outputFile,
                         });
 
-                        state.turnStartOffset = turnEndedAt;
+                        state.turnStartOffset = turnEndedAt; // Prepara siguiente turno.
                     }
                 }
-            } catch (e) {
-                console.error('[VAD] error', {
-                    uuid: state.uuid,
-                    error: String(e?.message || e),
-                });
+
+            } catch (e) { // Error iteración.
+                console.error('[VAD] error', { uuid: state.uuid, error: String(e?.message || e) }); // Log error.
             }
 
-            if (!state.isActive) break;
-            await sleep(state.vadPollMs);
+            if (!state.isActive) break; // Seguridad extra.
+            await sleep(state.vadPollMs); // Pausa controlada.
         }
-    } catch (e) {
-        console.error('[ESL] bidirectional loop error', {
-            uuid: state.uuid,
-            error: String(e?.message || e),
-        });
+
+    } catch (e) { // Error global.
+        console.error('[ESL] bidirectional loop error', { uuid: state.uuid, error: String(e?.message || e) }); // Log global.
     }
 }
 
-module.exports = { runVadLoop };
+module.exports = { runVadLoop }; // Exporta.
