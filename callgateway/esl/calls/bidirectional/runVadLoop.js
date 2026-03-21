@@ -76,6 +76,15 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Loop princip
                         const outputFile = path.join(turnsDir, `${state.uuid}_turn_${state.turnSeq}.wav`); // Ruta final del turno.
 
                         await mkdir(turnsDir, { recursive: true }); // Asegura que exista la carpeta.
+                        console.log('[TURN_BOUNDS]', { // Traza límites reales del turno.
+                            uuid: state.uuid, // UUID llamada.
+                            turnSeq: state.turnSeq, // Número de turno.
+                            turnStartOffset: state.turnStartOffset, // Inicio real.
+                            turnEndedAt, // Fin real.
+                            turnBytes, // Tamaño calculado.
+                            bytesRead: result.bytesRead, // Bloque VAD leído.
+                            vadOffset: state.vadOffset, // Offset acumulado.
+                        });
                         await extractTurnAudio({ // Extrae el WAV del turno detectado.
                             recordFile: state.recordFile, // WAV continuo fuente.
                             startOffset: state.turnStartOffset, // Inicio del turno.
