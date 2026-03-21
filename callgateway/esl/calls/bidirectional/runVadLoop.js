@@ -6,129 +6,145 @@ const { extractTurnAudio } = require('./extractTurnAudio'); // Extrae WAV del tu
 
 /**
  * Loop VAD: detecta inicio y fin de turno por silencio real.
- * @param {object} deps - Dependencias del loop.
- * @param {object} deps.state - Estado mutable de la sesión bidireccional.
- * @param {Function} deps.detectSpeechInWav - Detector incremental de voz sobre WAV.
- * @param {Function} deps.sleep - Pausa asíncrona entre iteraciones.
+ * @param {object} deps
+ * @param {object} deps.state
+ * @param {Function} deps.detectSpeechInWav
+ * @param {Function} deps.sleep
  */
-async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Define el loop principal.
-    try { // Protege el loop completo.
-        while (state.isActive) { // Repite mientras la sesión siga activa.
+async function runVadLoop({ state, detectSpeechInWav, sleep }) {
+    try {
+        while (state.isActive) {
+            if ((Date.now() - state.bidirectionalStartedAt) >= state.maxBidirectionalMs) {
+                state.isActive = false;
+                console.log('[ESL] bidirectional loop timeout', {
+                    uuid: state.uuid,
+                    maxBidirectionalMs: state.maxBidirectionalMs,
+                });
+                break;
+            }
 
-            if ((Date.now() - state.bidirectionalStartedAt) >= state.maxBidirectionalMs) { // Comprueba timeout global.
-                state.isActive = false; // Apaga la sesión por timeout.
-                console.log('[ESL] bidirectional loop timeout', { uuid: state.uuid, maxBidirectionalMs: state.maxBidirectionalMs }); // Log de timeout.
-                break; // Sale del loop.
-            } // Fin del control de timeout.
+            try {
+                const result = await detectSpeechInWav(state.recordFile, state.vadOffset);
+                state.vadOffset = result.nextOffset;
 
-            try { // Protege la iteración actual del VAD.
-                const result = await detectSpeechInWav(state.recordFile, state.vadOffset); // Lee solo el audio nuevo desde el último offset.
-                state.vadOffset = result.nextOffset; // Guarda el nuevo offset procesado.
+                console.log('[VAD]', {
+                    uuid: state.uuid,
+                    speech: result.speech,
+                    rms: result.rms,
+                    peak: result.peak,
+                    durationMs: result.durationMs,
+                    bytesRead: result.bytesRead,
+                    vadOffset: state.vadOffset,
+                });
 
-                console.log('[VAD]', { // Registra la lectura VAD.
-                    uuid: state.uuid, // UUID de la llamada.
-                    speech: result.speech, // Indica si hubo voz en este bloque.
-                    rms: result.rms, // Energía media del bloque.
-                    peak: result.peak, // Pico máximo del bloque.
-                    durationMs: result.durationMs, // Duración analizada.
-                    bytesRead: result.bytesRead, // Bytes nuevos leídos.
-                    vadOffset: state.vadOffset, // Offset acumulado.
-                }); // Fin del log VAD.
+                const now = Date.now();
 
-                const now = Date.now(); // Guarda el instante actual.
+                if (result.speech) {
+                    if (!state.speechActive) {
+                        state.speechActive = true;
+                        state.speechStartedAt = now;
+                        state.turnStartOffset = Math.max(44, state.vadOffset - result.bytesRead);
 
-                if (result.speech) { // Entra si el bloque actual contiene voz.
-                    state.lastSpeechOffset = state.vadOffset; // Guarda último byte donde todavía hubo voz real
-                    if (!state.speechActive) { // Entra si todavía no había un turno activo.
-                        state.speechActive = true; // Marca turno activo.
-                        state.speechStartedAt = now; // Guarda el inicio temporal del turno.
-                        state.turnStartOffset = Math.max(44, state.vadOffset - result.bytesRead); // Fija el offset inicial real del turno.
+                        console.log('[TURN]', {
+                            uuid: state.uuid,
+                            event: 'speech_start',
+                            speechStartedAt: state.speechStartedAt,
+                            turnStartOffset: state.turnStartOffset,
+                            vadOffset: state.vadOffset,
+                        });
+                    }
 
-                        console.log('[TURN]', { // Registra el inicio del turno.
-                            uuid: state.uuid, // UUID llamada.
-                            event: 'speech_start', // Tipo de evento.
-                            speechStartedAt: state.speechStartedAt, // Instante de inicio.
-                            turnStartOffset: state.turnStartOffset, // Offset inicial del turno.
-                            vadOffset: state.vadOffset, // Offset actual.
-                        }); // Fin del log de inicio.
-                    } // Fin del arranque de turno.
+                    state.lastSpeechAt = now;
+                    state.lastSpeechOffset = state.vadOffset;
+                } else if (
+                    state.speechActive &&
+                    state.lastSpeechAt &&
+                    (now - state.lastSpeechAt) >= state.endSilenceMs
+                ) {
+                    const turnEndedAt = state.lastSpeechOffset || state.vadOffset;
+                    const turnBytes = Math.max(0, turnEndedAt - state.turnStartOffset);
 
-                    state.lastSpeechAt = now; // Actualiza el último instante con voz.
-                } else if (state.speechActive && state.lastSpeechAt && (now - state.lastSpeechAt) >= state.endSilenceMs) { // Cierra turno solo si había voz y ya hubo suficiente silencio real.
-                    const turnEndedAt = state.lastSpeechOffset || state.vadOffset; // Marca el offset final del turno, preferiblemente el último instante con voz real.
-                    const turnBytes = Math.max(0, turnEndedAt - state.turnStartOffset); // Calcula el tamaño total del turno.
+                    state.speechActive = false;
 
-                    state.speechActive = false; // Cierra el estado de turno activo.
+                    if (turnBytes < state.minTurnBytes) {
+                        console.log('[TURN]', {
+                            uuid: state.uuid,
+                            event: 'speech_discarded',
+                            turnStartOffset: state.turnStartOffset,
+                            turnEndedAt,
+                            turnBytes,
+                            minTurnBytes: state.minTurnBytes,
+                        });
 
-                    if (turnBytes < state.minTurnBytes) { // Descarta turnos demasiado pequeños.
-                        console.log('[TURN]', { // Registra descarte.
-                            uuid: state.uuid, // UUID llamada.
-                            event: 'speech_discarded', // Evento de descarte.
-                            turnStartOffset: state.turnStartOffset, // Inicio del turno.
-                            turnEndedAt, // Fin del turno.
-                            turnBytes, // Tamaño detectado.
-                            minTurnBytes: state.minTurnBytes, // Mínimo exigido.
-                        }); // Fin del log de descarte.
+                        state.turnStartOffset = turnEndedAt;
+                    } else {
+                        state.turnSeq += 1;
 
-                        state.turnStartOffset = turnEndedAt; // Recoloca el inicio al final descartado.
-                    } else { // Entra si el turno es válido.
-                        state.turnSeq += 1; // Incrementa el contador de turnos válidos.
+                        const turnsDir = '/var/lib/freeswitch/recordings/cgw/turns';
+                        const outputFile = path.join(
+                            turnsDir,
+                            `${state.uuid}_turn_${state.turnSeq}.wav`
+                        );
 
-                        const turnsDir = '/var/lib/freeswitch/recordings/cgw/turns'; // Define la carpeta de turnos.
-                        const outputFile = path.join(turnsDir, `${state.uuid}_turn_${state.turnSeq}.wav`); // Construye la ruta del WAV final.
+                        await mkdir(turnsDir, { recursive: true });
 
-                        await mkdir(turnsDir, { recursive: true }); // Asegura que exista la carpeta destino.
+                        console.log('[TURN_BOUNDS]', {
+                            uuid: state.uuid,
+                            turnSeq: state.turnSeq,
+                            turnStartOffset: state.turnStartOffset,
+                            turnEndedAt,
+                            turnBytes,
+                            bytesRead: result.bytesRead,
+                            vadOffset: state.vadOffset,
+                            lastSpeechOffset: state.lastSpeechOffset,
+                        });
 
-                        console.log('[TURN_BOUNDS]', { // Registra límites reales del turno.
-                            uuid: state.uuid, // UUID llamada.
-                            turnSeq: state.turnSeq, // Número de turno.
-                            turnStartOffset: state.turnStartOffset, // Inicio real.
-                            turnEndedAt, // Fin real.
-                            turnBytes, // Tamaño real.
-                            bytesRead: result.bytesRead, // Bytes leídos en esta iteración.
-                            vadOffset: state.vadOffset, // Offset acumulado.
-                        }); // Fin del log de límites.
+                        await extractTurnAudio({
+                            recordFile: state.recordFile,
+                            startOffset: state.turnStartOffset,
+                            endOffset: turnEndedAt,
+                            outputFile,
+                        });
 
-                        await extractTurnAudio({ // Extrae el audio del turno.
-                            recordFile: state.recordFile, // WAV continuo fuente.
-                            startOffset: state.turnStartOffset, // Inicio del turno.
-                            endOffset: turnEndedAt, // Fin del turno.
-                            outputFile, // Ruta del archivo de salida.
-                        }); // Fin de la extracción.
+                        console.log('[TURN_AUDIO]', {
+                            uuid: state.uuid,
+                            turnSeq: state.turnSeq,
+                            outputFile,
+                        });
 
-                        console.log('[TURN_AUDIO]', { // Registra el archivo generado.
-                            uuid: state.uuid, // UUID llamada.
-                            turnSeq: state.turnSeq, // Número de turno.
-                            outputFile, // Ruta del archivo generado.
-                        }); // Fin del log de audio.
+                        console.log('[TURN]', {
+                            uuid: state.uuid,
+                            event: 'turn_ready',
+                            turnSeq: state.turnSeq,
+                            speechStartedAt: state.speechStartedAt,
+                            lastSpeechAt: state.lastSpeechAt,
+                            silenceMs: now - state.lastSpeechAt,
+                            turnStartOffset: state.turnStartOffset,
+                            turnEndedAt,
+                            turnBytes,
+                            recordFile: state.recordFile,
+                            outputFile,
+                        });
 
-                        console.log('[TURN]', { // Registra el turno listo.
-                            uuid: state.uuid, // UUID llamada.
-                            event: 'turn_ready', // Evento de turno listo.
-                            turnSeq: state.turnSeq, // Número de turno.
-                            speechStartedAt: state.speechStartedAt, // Inicio temporal del turno.
-                            lastSpeechAt: state.lastSpeechAt, // Último instante con voz.
-                            silenceMs: now - state.lastSpeechAt, // Silencio que ha cerrado el turno.
-                            turnStartOffset: state.turnStartOffset, // Offset inicial.
-                            turnEndedAt, // Offset final.
-                            turnBytes, // Tamaño final.
-                            recordFile: state.recordFile, // Archivo continuo fuente.
-                            outputFile, // Archivo final recortado.
-                        }); // Fin del log turn_ready.
+                        state.turnStartOffset = turnEndedAt;
+                    }
+                }
+            } catch (e) {
+                console.error('[VAD] error', {
+                    uuid: state.uuid,
+                    error: String(e?.message || e),
+                });
+            }
 
-                        state.turnStartOffset = turnEndedAt; // Prepara el siguiente turno.
-                    } // Fin de turno válido.
-                } // Fin del cierre por silencio real.
-            } catch (e) { // Captura error de esta iteración.
-                console.error('[VAD] error', { uuid: state.uuid, error: String(e?.message || e) }); // Registra error.
-            } // Fin del try/catch interno.
+            if (!state.isActive) break;
+            await sleep(state.vadPollMs);
+        }
+    } catch (e) {
+        console.error('[ESL] bidirectional loop error', {
+            uuid: state.uuid,
+            error: String(e?.message || e),
+        });
+    }
+}
 
-            if (!state.isActive) break; // Seguridad extra por si la sesión se apagó.
-            await sleep(state.vadPollMs); // Espera entre polls.
-        } // Fin del while.
-    } catch (e) { // Captura error global del loop.
-        console.error('[ESL] bidirectional loop error', { uuid: state.uuid, error: String(e?.message || e) }); // Registra error global.
-    } // Fin del try/catch global.
-} // Fin de la función.
-
-module.exports = { runVadLoop }; // Exporta la función.
+module.exports = { runVadLoop };
