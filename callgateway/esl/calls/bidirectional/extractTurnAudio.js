@@ -28,8 +28,8 @@ async function extractTurnAudio({ recordFile, startOffset, endOffset, outputFile
     header.writeUInt32LE(16, 16); // Subchunk1Size.
     header.writeUInt16LE(1, 20); // AudioFormat PCM.
     header.writeUInt16LE(1, 22); // NumChannels.
-    header.writeUInt32LE(8000, 24); // SampleRate.
-    header.writeUInt32LE(16000, 28); // ByteRate.
+    header.writeUInt32LE(16000, 24); // SampleRate.
+    header.writeUInt32LE(32000, 28); // ByteRate.
     header.writeUInt16LE(2, 32); // BlockAlign.
     header.writeUInt16LE(16, 34); // BitsPerSample.
     header.write('data', 36); // Subchunk2ID.
