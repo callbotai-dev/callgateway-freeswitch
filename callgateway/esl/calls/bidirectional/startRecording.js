@@ -10,7 +10,7 @@
  */
 async function startRecording({ uuid, recordFile, apiAsync, sleep }) { // Función inicio grabación.
     try { // Protege ejecución.
-        await apiAsync(`uuid_record ${uuid} start ${recordFile}`); // Arranca grabación en FS.
+        await apiAsync(`uuid_record ${uuid} start ${recordFile} bleg`); // Arranca grabación en FS.
         console.log('[ESL] recording started', { uuid, recordFile }); // Log OK.
         await sleep(250); // Da tiempo a que FS empiece a escribir audio real.
     } catch (e) { // Captura error.
