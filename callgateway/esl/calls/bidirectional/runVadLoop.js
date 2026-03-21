@@ -1,5 +1,9 @@
 'use strict'; // Fuerza modo estricto.
 
+const path = require('node:path'); // Maneja rutas del sistema.
+const { mkdir } = require('node:fs/promises'); // Crea carpetas si no existen.
+const { extractTurnAudio } = require('./extractTurnAudio'); // Extrae WAV del turno detectado.
+
 /**
  * Loop VAD puro: detecta inicio y fin de turno por silencio.
  * @param {object} deps - Dependencias del loop.
@@ -68,6 +72,23 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Loop princip
                     } else { // Si el turno es válido.
                         state.turnSeq += 1; // Incrementa contador de turnos válidos.
 
+                        const turnsDir = '/var/lib/freeswitch/recordings/cgw/turns'; // Carpeta destino de turnos.
+                        const outputFile = path.join(turnsDir, `${state.uuid}_turn_${state.turnSeq}.wav`); // Ruta final del turno.
+
+                        await mkdir(turnsDir, { recursive: true }); // Asegura que exista la carpeta.
+                        await extractTurnAudio({ // Extrae el WAV del turno detectado.
+                            recordFile: state.recordFile, // WAV continuo fuente.
+                            startOffset: state.turnStartOffset, // Inicio del turno.
+                            endOffset: turnEndedAt, // Fin del turno.
+                            outputFile, // Archivo de salida.
+                        });
+
+                        console.log('[TURN_AUDIO]', { // Log del archivo generado.
+                            uuid: state.uuid, // UUID llamada.
+                            turnSeq: state.turnSeq, // Número de turno.
+                            outputFile, // Ruta del WAV recortado.
+                        });
+
                         console.log('[TURN]', { // Log de turno válido cerrado.
                             uuid: state.uuid, // UUID llamada.
                             event: 'turn_ready', // Turno listo.
@@ -79,6 +100,7 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Loop princip
                             turnEndedAt, // Offset fin.
                             turnBytes, // Tamaño final.
                             recordFile: state.recordFile, // Archivo fuente continuo.
+                            outputFile, // Archivo final del turno.
                         });
 
                         state.turnStartOffset = turnEndedAt; // Prepara el siguiente turno.

@@ -8,9 +8,14 @@ const fs = require('fs').promises; // FS async.
  */
 async function extractTurnAudio({ recordFile, startOffset, endOffset, outputFile }) { // Función principal.
 
+    // Validaciones críticas.
+    if (!recordFile) throw new Error('recordFile requerido'); // Evita ruta null.
+    if (!outputFile) throw new Error('outputFile requerido'); // Evita escritura inválida.
+    if (endOffset <= startOffset) throw new Error('offset inválido'); // Evita chunk vacío o negativo.
+
     const fd = await fs.open(recordFile, 'r'); // Abre WAV original.
     const length = endOffset - startOffset; // Calcula tamaño del chunk.
-
+    if (length < 320) return null; // Ignora audios demasiado pequeños (~20ms a 8kHz).
     const buffer = Buffer.alloc(length); // Reserva buffer.
     await fd.read(buffer, 0, length, startOffset); // Lee segmento exacto.
     await fd.close(); // Cierra archivo.
