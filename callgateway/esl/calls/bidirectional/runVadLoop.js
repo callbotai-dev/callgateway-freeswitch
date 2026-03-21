@@ -38,6 +38,7 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Define el lo
                 const now = Date.now(); // Guarda el instante actual.
 
                 if (result.speech) { // Entra si el bloque actual contiene voz.
+                    state.lastSpeechOffset = state.vadOffset; // Guarda último byte donde todavía hubo voz real
                     if (!state.speechActive) { // Entra si todavía no había un turno activo.
                         state.speechActive = true; // Marca turno activo.
                         state.speechStartedAt = now; // Guarda el inicio temporal del turno.
@@ -54,7 +55,7 @@ async function runVadLoop({ state, detectSpeechInWav, sleep }) { // Define el lo
 
                     state.lastSpeechAt = now; // Actualiza el último instante con voz.
                 } else if (state.speechActive && state.lastSpeechAt && (now - state.lastSpeechAt) >= state.endSilenceMs) { // Cierra turno solo si había voz y ya hubo suficiente silencio real.
-                    const turnEndedAt = state.vadOffset; // Marca el final bruto del turno.
+                    const turnEndedAt = state.lastSpeechOffset || state.vadOffset; // Marca el offset final del turno, preferiblemente el último instante con voz real.
                     const turnBytes = Math.max(0, turnEndedAt - state.turnStartOffset); // Calcula el tamaño total del turno.
 
                     state.speechActive = false; // Cierra el estado de turno activo.

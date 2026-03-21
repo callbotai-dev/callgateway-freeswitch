@@ -24,6 +24,7 @@ function createBidirectionalState({ uuid, inCallTimeoutMs }) { // Fabrica el est
         turnSeq: 0, // Secuencia de turnos.
         speechSeq: 0, // Secuencia de eventos speech.
         vadPollMs: Number(process.env.CGW_VAD_POLL_MS || 100), // Espera entre polls.
+        lastSpeechOffset: 44, // Último offset con voz real detectada.
     }; // Fin del estado.
 } // Fin de la función.
 
